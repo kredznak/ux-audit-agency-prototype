@@ -2,7 +2,7 @@
 
 A single-file HTML prototype that uses Claude as a UX audit orchestrator. Open `index.html` in Chrome — no setup, no build step.
 
-**GitHub:** https://github.com/kredznak/ux-audit-agency
+**GitHub:** https://github.com/kredznak/ux-audit-agency-prototype
 
 ## How it works
 
