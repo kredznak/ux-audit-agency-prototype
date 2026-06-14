@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UX Audit Agency</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --black:    #111827;
+      --gray-600: #4b5563;
+      --gray-500: #6b7280;
+      --gray-400: #9ca3af;
+      --gray-300: #d1d5db;
+      --gray-200: #e5e7eb;
+      --gray-100: #f3f4f6;
+      --gray-50:  #f9fafb;
+      --white:    #ffffff;
+      --red:      #dc2626;
+      --amber:    #d97706;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--white);
+      color: var(--black);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top bar ── */
+    .topbar {
+      border-bottom: 1px solid var(--gray-200);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 8px; }
+    .topbar-title { font-size: 15px; font-weight: 800; letter-spacing: -0.5px; }
+    .topbar-subtitle { font-size: 12px; color: var(--gray-400); }
+    .topbar-sep { color: var(--gray-200); }
+    .api-key-row { display: flex; align-items: center; gap: 8px; }
+    .api-key-label { font-size: 11px; color: var(--gray-400); }
+    .api-key-input {
+      border: 1px solid var(--gray-200);
+      border-radius: 4px;
+      padding: 5px 10px;
+      font-size: 11px;
+      width: 210px;
+      font-family: monospace;
+      outline: none;
+    }
+    .api-key-input:focus { border-color: var(--gray-500); }
+
+    /* ── Split panels ── */
+    .panels { display: flex; flex: 1; overflow: hidden; }
+
+    .left-panel {
+      width: 340px;
+      flex-shrink: 0;
+      border-right: 1px solid var(--gray-100);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow-y: auto;
+    }
+
+    .right-panel {
+      flex: 1;
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    /* ── Shared typography ── */
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--gray-500);
+      margin-bottom: 10px;
+    }
+    .divider { border: none; border-top: 1px solid var(--gray-100); }
+
+    /* ── Input form ── */
+    .url-input {
+      width: 100%;
+      border: 1px solid var(--gray-200);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-family: var(--font);
+      outline: none;
+      color: var(--black);
+    }
+    .url-input:focus { border-color: var(--gray-500); }
+    .url-input::placeholder { color: var(--gray-400); }
+
+    .or-divider {
+      font-size: 11px;
+      color: var(--gray-400);
+      text-align: center;
+      margin: 4px 0;
+    }
+
+    .drop-zone {
+      border: 1px dashed var(--gray-200);
+      border-radius: 6px;
+      padding: 14px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--gray-400);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: var(--gray-500);
+      background: var(--gray-50);
+    }
+    .drop-zone.has-file { border-color: var(--black); color: var(--black); }
+
+    .run-btn {
+      width: 100%;
+      background: var(--black);
+      color: var(--white);
+      border: none;
+      border-radius: 5px;
+      padding: 11px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: var(--font);
+      transition: opacity 0.15s;
+    }
+    .run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .run-btn:hover:not(:disabled) { opacity: 0.85; }
+
+    /* ── Orchestrator status (shown after audit) ── */
+    #orchestratorStatus { display: none; }
+    .page-type-label { font-size: 14px; font-weight: 700; margin-bottom: 14px; }
+    .agent-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+    .agent-row.visible { opacity: 1; transform: translateY(0); }
+    .agent-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .agent-dot.active { background: var(--black); }
+    .agent-dot.skipped { background: var(--gray-200); }
+    .agent-name { font-size: 13px; font-weight: 600; }
+    .agent-name.skipped { color: var(--gray-300); font-weight: 400; }
+    .agent-reason { font-size: 11px; color: var(--gray-400); margin-left: auto; }
+
+    .timing-row {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid var(--gray-100);
+      font-size: 11px;
+      color: var(--gray-400);
+    }
+    .timing-value { color: var(--black); font-weight: 600; }
+
+    /* ── Right panel ── */
+    .right-empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 60vh;
+      font-size: 13px;
+      color: var(--gray-400);
+    }
+
+    .findings-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    .findings-count { color: var(--gray-300); font-weight: 400; margin-left: 6px; }
+    .findings-sort-label { font-size: 11px; color: var(--gray-400); }
+
+    .finding-row {
+      border-top: 1px solid var(--gray-100);
+      padding: 16px 0;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    .finding-row.visible { opacity: 1; transform: translateY(0); }
+
+    .finding-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .severity-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .severity-dot.critical { background: var(--red); }
+    .severity-dot.major    { background: var(--amber); }
+    .severity-dot.minor    { background: var(--gray-400); }
+
+    .severity-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .severity-label.critical { color: var(--red); }
+    .severity-label.major    { color: var(--amber); }
+    .severity-label.minor    { color: var(--gray-500); }
+
+    .finding-category { font-size: 11px; color: var(--gray-400); }
+
+    .finding-title { font-size: 14px; font-weight: 700; margin-bottom: 5px; }
+    .finding-description { font-size: 13px; color: var(--gray-600); margin-bottom: 6px; line-height: 1.5; }
+    .finding-location { font-size: 11px; color: var(--gray-400); margin-bottom: 8px; }
+    .finding-fix {
+      font-size: 12px;
+      color: var(--gray-600);
+      background: var(--gray-50);
+      border-radius: 4px;
+      padding: 7px 10px;
+      line-height: 1.5;
+    }
+    .finding-fix code {
+      font-family: monospace;
+      font-size: 11px;
+      background: var(--gray-100);
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+
+    .show-more-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      border-top: 1px solid var(--gray-100);
+      padding: 14px 0;
+      font-size: 12px;
+      color: var(--gray-400);
+      cursor: pointer;
+      font-family: var(--font);
+    }
+    .show-more-btn:hover { color: var(--black); }
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-title">UX Audit Agency</span>
+      <span class="topbar-sep">·</span>
+      <span class="topbar-subtitle">Powered by Claude</span>
+    </div>
+    <div class="api-key-row">
+      <span class="api-key-label">API key</span>
+      <input type="password" class="api-key-input" id="apiKey" placeholder="sk-ant-..." autocomplete="off">
+    </div>
+  </div>
+
+  <div class="panels">
+    <div class="left-panel" id="leftPanel">
+
+      <!-- Input section -->
+      <div id="inputSection">
+        <div class="section-label">Input</div>
+        <input type="url" class="url-input" id="urlInput" placeholder="https://yoursite.com">
+        <div class="or-divider">or</div>
+        <div class="drop-zone" id="dropZone">
+          <span id="dropLabel">Drop screenshots here · or click to browse</span>
+          <input type="file" id="fileInput" accept="image/*" multiple style="display:none">
+        </div>
+        <div style="margin-top:12px">
+          <button class="run-btn" id="runBtn">Run audit</button>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- Orchestrator status (hidden until audit runs) -->
+      <div id="orchestratorStatus">
+        <div class="section-label">Orchestrator</div>
+        <div class="page-type-label" id="pageTypeLabel"></div>
+        <div style="font-size:11px;color:var(--gray-500);margin-bottom:8px;">Agents spawned</div>
+        <div id="agentList"></div>
+        <div class="timing-row">
+          Completed in <span class="timing-value" id="timingValue">—</span>
+        </div>
+      </div>
+
+    </div>
+    <div class="right-panel" id="rightPanel"></div>
+  </div>
+
+  <script>
+    // ── Orchestrator ───────────────────────────────────────────────────────
+    const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
+    const MODEL      = 'claude-haiku-4-5-20251001';
+
+    const FALLBACK_RESULT = {
+      page_type: 'unknown',
+      agents_to_spawn: ['heuristics'],
+      agent_reasons: {
+        heuristics: 'always',
+        accessibility: 'skipped — classification unavailable',
+        forms: 'skipped — classification unavailable',
+        copy: 'skipped — classification unavailable'
+      },
+      reasoning: 'Classification unavailable — running heuristics audit only.',
+      fallback: true
+    };
+
+    async function classify(input, apiKey) {
+      // input is either a URL string or a base64 object: { base64, mediaType }
+      const isImage = typeof input === 'object' && input.base64;
+
+      const userContent = isImage
+        ? [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: input.mediaType, data: input.base64 }
+            },
+            {
+              type: 'text',
+              text: 'Classify this UI screenshot as described in the system prompt. Return JSON only.'
+            }
+          ]
+        : `Classify this URL: ${input}`;
+
+      const body = {
+        model: MODEL,
+        max_tokens: 300,
+        system: `You are a UX audit orchestrator. Analyze the given page and return a JSON object only — no prose, no markdown, just the raw JSON.
+
+Return this exact shape:
+{
+  "page_type": "one of: landing_page | saas_app | checkout_flow | content_page | form_page | other",
+  "agents_to_spawn": ["heuristics"],
+  "agent_reasons": {
+    "heuristics": "always",
+    "accessibility": "included — reason OR skipped — reason",
+    "forms": "included — reason OR skipped — reason",
+    "copy": "included — reason OR skipped — reason"
+  },
+  "reasoning": "one sentence describing the page"
+}
+
+Rules (follow exactly):
+- Always include "heuristics" in agents_to_spawn
+- Include "accessibility" unless the input is a screenshot with no DOM available
+- Include "forms" only if page_type is checkout_flow or form_page
+- Include "copy" only if page_type is landing_page`,
+        messages: [{ role: 'user', content: userContent }]
+      };
+
+      try {
+        const res = await fetch(CLAUDE_API, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify(body)
+        });
+
+        if (!res.ok) throw new Error(`API error ${res.status}`);
+
+        const data = await res.json();
+        const text = data.content?.[0]?.text ?? '';
+        // Strip markdown code fences if Claude wraps in them
+        const clean = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+        return JSON.parse(clean);
+      } catch (err) {
+        console.warn('Classification failed, using fallback:', err);
+        return FALLBACK_RESULT;
+      }
+    }
+
+    // ── Agent display config ───────────────────────────────────────────────
+    const ALL_AGENTS = ['heuristics', 'accessibility', 'forms', 'copy'];
+
+    const AGENT_LABELS = {
+      heuristics:    'Heuristics',
+      accessibility: 'Accessibility',
+      forms:         'Forms / Flow',
+      copy:          'Copy agent'
+    };
+
+    // ── Sequential reveal ──────────────────────────────────────────────────
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function revealAgents(result) {
+      const status = document.getElementById('orchestratorStatus');
+      const pageTypeLabel = document.getElementById('pageTypeLabel');
+      const agentList = document.getElementById('agentList');
+
+      // Format page type for display
+      const label = result.page_type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      if (!result.fallback) pageTypeLabel.textContent = label;
+      status.style.display = 'block';
+
+      agentList.innerHTML = '';
+      for (const agent of ALL_AGENTS) {
+        const spawned = result.agents_to_spawn.includes(agent);
+        const reason  = result.agent_reasons?.[agent] ?? '';
+        const row = document.createElement('div');
+        row.className = 'agent-row';
+        row.innerHTML = `
+          <div class="agent-dot ${spawned ? 'active' : 'skipped'}"></div>
+          <span class="agent-name ${spawned ? '' : 'skipped'}">${AGENT_LABELS[agent]}</span>
+          <span class="agent-reason">${escapeHtml(reason)}</span>
+        `;
+        agentList.appendChild(row);
+        await sleep(50); // mount first, then animate
+        row.classList.add('visible');
+        await sleep(300);
+      }
+    }
+
+    async function revealFindings(findings) {
+      await sleep(800); // pause after last agent badge
+
+      // Show "Generating findings..." briefly
+      const panel = document.getElementById('rightPanel');
+      panel.innerHTML = '<div class="right-empty">Generating findings…</div>';
+      await sleep(600);
+
+      renderFindings(findings);
+
+      // Stagger finding rows into view
+      const rows = panel.querySelectorAll('.finding-row');
+      for (const row of rows) {
+        await sleep(200);
+        row.classList.add('visible');
+      }
+    }
+
+    // ── Main run handler ───────────────────────────────────────────────────
+    async function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload  = e => resolve({
+          base64: e.target.result.split(',')[1],
+          mediaType: file.type || 'image/png'
+        });
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function runAudit() {
+      const apiKey  = document.getElementById('apiKey').value.trim();
+      const urlVal  = document.getElementById('urlInput').value.trim();
+      const runBtn  = document.getElementById('runBtn');
+
+      if (!apiKey) { alert('Please enter your Anthropic API key.'); return; }
+      if (!urlVal && !uploadedFiles.length) { alert('Please enter a URL or upload screenshots.'); return; }
+      if (urlVal && !urlVal.startsWith('http')) { alert('Please enter a full URL including https://'); return; }
+
+      // Reset right panel and hide old orchestrator status
+      renderEmptyState();
+      document.getElementById('orchestratorStatus').style.display = 'none';
+      document.getElementById('agentList').innerHTML = '';
+
+      runBtn.disabled = true;
+      runBtn.textContent = 'Analyzing…';
+      const startTime = Date.now();
+
+      // Determine input
+      let input;
+      if (uploadedFiles.length) {
+        input = await readFileAsBase64(uploadedFiles[0]);
+      } else {
+        input = urlVal;
+      }
+
+      // Real Claude call
+      const result = await classify(input, apiKey);
+
+      if (result.fallback) {
+        document.getElementById('pageTypeLabel').textContent = 'Classification unavailable';
+      }
+
+      // Reveal agents sequentially
+      await revealAgents(result);
+
+      // Synthesize + reveal findings
+      const findings = synthesize(result.agents_to_spawn);
+      await revealFindings(findings);
+
+      // Show timing
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      document.getElementById('timingValue').textContent = `${elapsed}s`;
+
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run audit';
+    }
+
+    document.getElementById('runBtn').addEventListener('click', runAudit);
+  </script>
+
+  <script>
+    // ── Findings database ──────────────────────────────────────────────────
+    const FINDINGS = {
+      heuristics: [
+        {
+          agent: 'heuristics',
+          category: 'H6 Recognition not recall',
+          severity: 'critical',
+          title: 'No visible focus states on interactive elements',
+          description: 'Nav links, form inputs, and buttons have no visible focus ring — keyboard users cannot track their position in the page.',
+          location: 'Global — all interactive elements',
+          fix: 'Add :focus-visible { outline: 2px solid #111827; outline-offset: 2px; } to all interactive elements.'
+        },
+        {
+          agent: 'heuristics',
+          category: 'H1 Visibility of system status',
+          severity: 'critical',
+          title: 'No loading indicator during async operations',
+          description: 'When the page submits a form or fetches data, there is no spinner, progress bar, or status message. Users have no feedback that anything is happening.',
+          location: 'Form submit button — all async interactions',
+          fix: 'Disable the button and show a loading label ("Saving...") immediately on submit. Restore on completion.'
+        },
+        {
+          agent: 'heuristics',
+          category: 'H4 Consistency and standards',
+          severity: 'major',
+          title: 'Inconsistent CTA button styles across pages',
+          description: 'Primary buttons use different colors, sizes, and border radii on different pages, creating uncertainty about which element is the primary action.',
+          location: '/pricing vs /checkout — CTA buttons',
+          fix: 'Define a single .btn-primary class in your design system and apply it consistently across all primary CTAs.'
+        },
+        {
+          agent: 'heuristics',
+          category: 'H8 Aesthetic and minimalist design',
+          severity: 'major',
+          title: 'Page contains competing visual priorities',
+          description: 'Three elements on the page use the same visual weight (bold, colored, large), making it unclear which action to take first.',
+          location: 'Homepage hero section',
+          fix: 'Establish a clear visual hierarchy: one primary action (high contrast), one secondary (outlined), rest as links.'
+        },
+        {
+          agent: 'heuristics',
+          category: 'H2 Match between system and real world',
+          severity: 'minor',
+          title: 'Technical error messages exposed to users',
+          description: 'Error states show internal codes like "Error 422: Unprocessable entity" instead of plain-language explanations.',
+          location: 'Form validation — email and password fields',
+          fix: 'Map all error codes to human-readable messages before rendering. "That email is already in use" not "422 conflict".'
+        },
+        {
+          agent: 'heuristics',
+          category: 'H7 Flexibility and efficiency',
+          severity: 'minor',
+          title: 'No keyboard shortcuts for common actions',
+          description: 'Power users performing repeated actions (e.g. saving, navigating) must use the mouse every time. No shortcut hints are visible.',
+          location: 'Global — action buttons and navigation',
+          fix: 'Add common shortcuts (Cmd+S to save, Esc to close modals) and surface them as tooltips on hover.'
+        }
+      ],
+
+      accessibility: [
+        {
+          agent: 'accessibility',
+          category: 'WCAG 1.4.3 Contrast (Minimum)',
+          severity: 'critical',
+          title: 'Body text fails minimum contrast ratio',
+          description: 'Primary body text color (#6b7280 on #ffffff) has a 4.1:1 contrast ratio — below the WCAG AA minimum of 4.5:1 for normal text.',
+          location: 'Global — all body copy and descriptions',
+          fix: 'Darken body text to #4b5563 or darker to achieve at least 4.5:1. Test with the WebAIM Contrast Checker.'
+        },
+        {
+          agent: 'accessibility',
+          category: 'WCAG 1.1.1 Non-text Content',
+          severity: 'major',
+          title: 'Decorative icons lack aria-hidden attribute',
+          description: 'Icon elements are read aloud by screen readers as their SVG path or an empty string, creating confusing noise for assistive technology users.',
+          location: 'Navigation icons, feature section icons',
+          fix: 'Add aria-hidden="true" to all purely decorative icons. For meaningful icons, add an aria-label describing the action.'
+        },
+        {
+          agent: 'accessibility',
+          category: 'WCAG 2.1.1 Keyboard',
+          severity: 'major',
+          title: 'Modal dialogs trap keyboard focus incorrectly',
+          description: 'When a modal opens, focus is not moved inside it, and Tab continues to cycle through the page behind the overlay.',
+          location: 'Cookie consent modal, account deletion confirmation',
+          fix: 'On modal open: move focus to the first focusable element inside. Trap Tab within the modal. On close, return focus to the trigger.'
+        },
+        {
+          agent: 'accessibility',
+          category: 'WCAG 1.4.3 Contrast (Minimum)',
+          severity: 'minor',
+          title: 'Placeholder text fails contrast ratio',
+          description: 'Input placeholder color (#a0aec0) has a 2.8:1 ratio, below the 4.5:1 minimum for normal text.',
+          location: 'All form inputs — email, password, search',
+          fix: 'Change placeholder color to #6b7280 or darker. Don\'t rely on placeholder as the only label for an input.'
+        }
+      ],
+
+      forms: [
+        {
+          agent: 'forms',
+          category: 'CTA placement',
+          severity: 'critical',
+          title: 'Primary CTA not visible without scrolling on 1280px viewport',
+          description: 'The checkout/submit button appears below the fold at 1280×800 — users must scroll to discover the primary action, creating friction and drop-off.',
+          location: '/checkout — step 2 of 3, form submission',
+          fix: 'Use a sticky footer CTA or reorder the form fields so the button appears above the fold. Test at 1280px and 375px.'
+        },
+        {
+          agent: 'forms',
+          category: 'Field labels',
+          severity: 'major',
+          title: 'Form fields use placeholder text instead of persistent labels',
+          description: 'When the user starts typing, the placeholder disappears — they can no longer see what the field is asking for. This is especially problematic on multi-field forms.',
+          location: 'Signup form — all 5 fields, checkout form — billing section',
+          fix: 'Add a visible <label> element above every input. Placeholder can remain as an example, not the only label.'
+        },
+        {
+          agent: 'forms',
+          category: 'Error states',
+          severity: 'major',
+          title: 'Validation errors only shown after full form submission',
+          description: 'Users complete all fields, submit, then see multiple error messages at once. Inline validation (on blur) would catch issues earlier and reduce frustration.',
+          location: 'All forms — validation trigger',
+          fix: 'Add on-blur validation to each field. Show the error message directly below the field it applies to, not in a banner.'
+        },
+        {
+          agent: 'forms',
+          category: 'Microcopy',
+          severity: 'minor',
+          title: 'Submit button copy does not describe the outcome',
+          description: '"Submit" and "Continue" give users no information about what happens next. They don\'t know if they\'re about to be charged, emailed, or redirected.',
+          location: 'Checkout step 2 CTA, signup final step',
+          fix: 'Replace with outcome-oriented copy: "Create my account", "Complete purchase — $49", "Send me the link".'
+        }
+      ],
+
+      copy: [
+        {
+          agent: 'copy',
+          category: 'Headline clarity',
+          severity: 'major',
+          title: 'Hero headline describes the product, not the user benefit',
+          description: 'The headline leads with what the product does ("AI-powered analytics platform") rather than the outcome the user gets. Visitors who don\'t already understand the category will bounce.',
+          location: 'Homepage hero — H1',
+          fix: 'Rewrite to lead with the outcome: "Know why users drop off — before it costs you" rather than a feature description.'
+        },
+        {
+          agent: 'copy',
+          category: 'Microcopy',
+          severity: 'minor',
+          title: 'Empty states have no guidance or next action',
+          description: 'When a list, table, or dashboard is empty, the screen shows nothing — no explanation of why it\'s empty, no suggestion of what to do first.',
+          location: 'Dashboard — projects list, activity feed',
+          fix: 'Add an empty state with a short explanation and a single primary action: "No projects yet. Create your first one →"'
+        },
+        {
+          agent: 'copy',
+          category: 'Trust signals',
+          severity: 'minor',
+          title: 'Pricing page lacks risk-reversal language',
+          description: 'No mention of a free trial, refund policy, or cancellation terms near the purchase CTA. Users hesitate when they don\'t know the cost of being wrong.',
+          location: 'Pricing page — below plan cards',
+          fix: 'Add a one-line reassurance near the CTA: "Cancel anytime. No questions asked." or "30-day money-back guarantee."'
+        }
+      ]
+    };
+
+    // ── Synthesizer ────────────────────────────────────────────────────────
+    const SEVERITY_ORDER = { critical: 0, major: 1, minor: 2 };
+
+    function synthesize(agentsToSpawn) {
+      const findings = agentsToSpawn.flatMap(agent => FINDINGS[agent] || []);
+      return findings.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+    }
+
+    // ── Renderer ───────────────────────────────────────────────────────────
+    function renderEmptyState() {
+      document.getElementById('rightPanel').innerHTML = `
+        <div class="right-empty" style="flex-direction:column;gap:10px;text-align:center">
+          <div style="font-size:28px;opacity:0.15">◎</div>
+          <div>Paste a URL or upload screenshots to begin.</div>
+          <div style="font-size:11px;color:var(--gray-300)">Audit takes ~15–30 seconds</div>
+        </div>`;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function findingHtml(f) {
+      return `
+        <div class="finding-meta">
+          <div class="severity-dot ${f.severity}"></div>
+          <span class="severity-label ${f.severity}">${f.severity}</span>
+          <span class="finding-category">${escapeHtml(f.agent)} · ${escapeHtml(f.category)}</span>
+        </div>
+        <div class="finding-title">${escapeHtml(f.title)}</div>
+        <div class="finding-description">${escapeHtml(f.description)}</div>
+        <div class="finding-location">Location: ${escapeHtml(f.location)}</div>
+        <div class="finding-fix">Fix: ${escapeHtml(f.fix)}</div>
+      `;
+    }
+
+    function renderFindings(findings) {
+      const panel = document.getElementById('rightPanel');
+      const VISIBLE = 5;
+      const top = findings.slice(0, VISIBLE);
+      const rest = findings.slice(VISIBLE);
+
+      let html = `
+        <div class="findings-header">
+          <div class="section-label">
+            Findings <span class="findings-count">${findings.length} total</span>
+          </div>
+          <div class="findings-sort-label">sorted by severity</div>
+        </div>
+      `;
+
+      top.forEach((f, i) => {
+        html += `<div class="finding-row" id="finding-${i}">${findingHtml(f)}</div>`;
+      });
+
+      if (rest.length) {
+        const restHtml = rest.map((f, i) =>
+          `<div class="finding-row" id="finding-${VISIBLE + i}" style="display:none">${findingHtml(f)}</div>`
+        ).join('');
+        html += restHtml;
+        html += `<button class="show-more-btn" id="showMoreBtn">+ ${rest.length} more finding${rest.length > 1 ? 's' : ''}</button>`;
+      }
+
+      panel.innerHTML = html;
+
+      if (rest.length) {
+        let expanded = false;
+        document.getElementById('showMoreBtn').addEventListener('click', () => {
+          expanded = !expanded;
+          rest.forEach((_, i) => {
+            const el = document.getElementById(`finding-${VISIBLE + i}`);
+            el.style.display = expanded ? 'block' : 'none';
+            if (expanded) setTimeout(() => el.classList.add('visible'), 20);
+            else el.classList.remove('visible');
+          });
+          document.getElementById('showMoreBtn').textContent = expanded
+            ? '− Show fewer'
+            : `+ ${rest.length} more finding${rest.length > 1 ? 's' : ''}`;
+        });
+      }
+    }
+
+    // Init empty state on load
+    renderEmptyState();
+  </script>
+
+  <script>
+    // Drop zone wiring
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const dropLabel = document.getElementById('dropLabel');
+    let uploadedFiles = [];
+
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      handleFiles(Array.from(e.dataTransfer.files));
+    });
+    fileInput.addEventListener('change', () => handleFiles(Array.from(fileInput.files)));
+
+    function handleFiles(files) {
+      const images = files.filter(f => f.type.startsWith('image/'));
+      if (!images.length) return;
+      uploadedFiles = images;
+      dropLabel.textContent = `${images.length} screenshot${images.length > 1 ? 's' : ''} ready`;
+      dropZone.classList.add('has-file');
+      document.getElementById('urlInput').value = '';
+    }
+  </script>
+
+</body>
+</html>
