@@ -318,10 +318,13 @@
       page_type: 'unknown',
       agents_to_spawn: ['heuristics'],
       agent_reasons: {
-        heuristics: 'always',
+        heuristics:    'always',
         accessibility: 'skipped — classification unavailable',
-        forms: 'skipped — classification unavailable',
-        copy: 'skipped — classification unavailable'
+        visual:        'skipped — classification unavailable',
+        forms:         'skipped — classification unavailable',
+        copy:          'skipped — classification unavailable',
+        conversion:    'skipped — classification unavailable',
+        mobile:        'skipped — classification unavailable'
       },
       reasoning: 'Classification unavailable — running heuristics audit only.',
       fallback: true
@@ -356,17 +359,24 @@ Return this exact shape:
   "agent_reasons": {
     "heuristics": "always",
     "accessibility": "included — reason OR skipped — reason",
+    "visual": "included — reason OR skipped — reason",
     "forms": "included — reason OR skipped — reason",
-    "copy": "included — reason OR skipped — reason"
+    "copy": "included — reason OR skipped — reason",
+    "conversion": "included — reason OR skipped — reason",
+    "mobile": "included — reason OR skipped — reason"
   },
-  "reasoning": "one sentence describing the page"
+  "reasoning": "one sentence describing the page",
+  "looks_mobile": false
 }
 
 Rules (follow exactly):
-- Always include "heuristics" in agents_to_spawn
-- Include "accessibility" unless the input is a screenshot with no DOM available
+- Always include "heuristics" and "accessibility" in agents_to_spawn
+- Include "visual" whenever a screenshot image is provided
 - Include "forms" only if page_type is checkout_flow or form_page
-- Include "copy" only if page_type is landing_page`,
+- Include "copy" only if page_type is landing_page or content_page
+- Include "conversion" only if page_type is landing_page or checkout_flow
+- Include "mobile" only if a screenshot is provided AND it looks like a mobile/narrow viewport; also set "looks_mobile" accordingly
+- For any agent you do not include, give a one-line "skipped — reason"`,
         messages: [{ role: 'user', content: userContent }]
       };
 
@@ -396,13 +406,16 @@ Rules (follow exactly):
     }
 
     // ── Agent display config ───────────────────────────────────────────────
-    const ALL_AGENTS = ['heuristics', 'accessibility', 'forms', 'copy'];
+    const ALL_AGENTS = ['heuristics', 'accessibility', 'visual', 'forms', 'copy', 'conversion', 'mobile'];
 
     const AGENT_LABELS = {
       heuristics:    'Heuristics',
       accessibility: 'Accessibility',
+      visual:        'Visual / hierarchy',
       forms:         'Forms / Flow',
-      copy:          'Copy agent'
+      copy:          'Copy',
+      conversion:    'Conversion / CTA',
+      mobile:        'Mobile / responsive'
     };
 
     // ── Sequential reveal ──────────────────────────────────────────────────
