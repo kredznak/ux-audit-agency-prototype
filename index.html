@@ -330,22 +330,30 @@
       fallback: true
     };
 
-    async function classify(input, apiKey) {
-      // input is either a URL string or a base64 object: { base64, mediaType }
+    // Build the user-content payload shared by the classifier and every agent.
+    // input is a URL string OR { base64, mediaType }. instruction is the task text.
+    function buildUserContent(input, instruction) {
       const isImage = typeof input === 'object' && input.base64;
+      if (isImage) {
+        return [
+          { type: 'image', source: { type: 'base64', media_type: input.mediaType, data: input.base64 } },
+          { type: 'text', text: instruction }
+        ];
+      }
+      return `${instruction}\n\nURL: ${input}`;
+    }
 
-      const userContent = isImage
-        ? [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: input.mediaType, data: input.base64 }
-            },
-            {
-              type: 'text',
-              text: 'Classify this UI screenshot as described in the system prompt. Return JSON only.'
-            }
-          ]
-        : `Classify this URL: ${input}`;
+    // Parse Claude's text, tolerating ```json fences.
+    function parseJson(text) {
+      const clean = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+      return JSON.parse(clean);
+    }
+
+    async function classify(input, apiKey) {
+      const instruction =
+        (typeof input === 'object' && input.base64)
+          ? 'Classify this UI screenshot as described in the system prompt. Return JSON only.'
+          : 'Classify this URL as described in the system prompt. You cannot see the live page — reason from the URL and your knowledge. Return JSON only.';
 
       const body = {
         model: MODEL,
@@ -377,7 +385,7 @@ Rules (follow exactly):
 - Include "conversion" only if page_type is landing_page or checkout_flow
 - Include "mobile" only if a screenshot is provided AND it looks like a mobile/narrow viewport; also set "looks_mobile" accordingly
 - For any agent you do not include, give a one-line "skipped — reason"`,
-        messages: [{ role: 'user', content: userContent }]
+        messages: [{ role: 'user', content: buildUserContent(input, instruction) }]
       };
 
       try {
@@ -391,14 +399,10 @@ Rules (follow exactly):
           },
           body: JSON.stringify(body)
         });
-
         if (!res.ok) throw new Error(`API error ${res.status}`);
-
         const data = await res.json();
         const text = data.content?.[0]?.text ?? '';
-        // Strip markdown code fences if Claude wraps in them
-        const clean = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-        return JSON.parse(clean);
+        return parseJson(text);
       } catch (err) {
         console.warn('Classification failed, using fallback:', err);
         return FALLBACK_RESULT;
