@@ -744,6 +744,69 @@ Rules:
           location: 'Pricing page — below plan cards',
           fix: 'Add a one-line reassurance near the CTA: "Cancel anytime. No questions asked." or "30-day money-back guarantee."'
         }
+      ],
+
+      visual: [
+        {
+          agent: 'visual',
+          category: 'Visual hierarchy',
+          severity: 'major',
+          title: 'Primary CTA has the same visual weight as secondary actions',
+          description: 'The main action does not stand out — it shares color, size, and weight with secondary links, so the eye has no clear entry point.',
+          location: 'Hero section — action row',
+          fix: 'Give the primary CTA a high-contrast solid fill and demote secondary actions to outlined or text styles.'
+        },
+        {
+          agent: 'visual',
+          category: 'Spacing & rhythm',
+          severity: 'minor',
+          title: 'Inconsistent vertical spacing between sections',
+          description: 'Section gaps vary without a clear pattern, making the page feel unstructured and harder to scan.',
+          location: 'Between content sections',
+          fix: 'Adopt a consistent spacing scale (e.g. 8px base) and apply the same section gap throughout.'
+        }
+      ],
+
+      conversion: [
+        {
+          agent: 'conversion',
+          category: 'Trust signals',
+          severity: 'major',
+          title: 'No social proof near the primary conversion point',
+          description: 'There are no testimonials, logos, ratings, or usage numbers near the CTA, so hesitant visitors have nothing to reduce perceived risk.',
+          location: 'Above and around the primary CTA',
+          fix: 'Add a row of customer logos, a star rating, or a short testimonial directly adjacent to the primary action.'
+        },
+        {
+          agent: 'conversion',
+          category: 'Risk reversal',
+          severity: 'minor',
+          title: 'Primary CTA lacks reassurance microcopy',
+          description: 'The action button gives no sense of commitment level — users do not know if they will be charged or can back out.',
+          location: 'Primary CTA',
+          fix: 'Add reassurance under the button: "No credit card required" or "Cancel anytime".'
+        }
+      ],
+
+      mobile: [
+        {
+          agent: 'mobile',
+          category: 'Touch targets',
+          severity: 'major',
+          title: 'Tap targets smaller than 44×44px',
+          description: 'Several interactive elements are below the recommended minimum touch size, making them hard to hit accurately on a phone.',
+          location: 'Navigation and inline links',
+          fix: 'Increase interactive elements to at least 44×44px and add padding around small links.'
+        },
+        {
+          agent: 'mobile',
+          category: 'Thumb reach',
+          severity: 'minor',
+          title: 'Primary action sits in the hard-to-reach top zone',
+          description: 'The main CTA is near the top of the viewport, outside the comfortable thumb zone for one-handed use.',
+          location: 'Top of mobile viewport',
+          fix: 'Consider a sticky bottom action bar for the primary CTA on small screens.'
+        }
       ]
     };
 
@@ -753,6 +816,11 @@ Rules:
     function synthesize(agentsToSpawn) {
       const findings = agentsToSpawn.flatMap(agent => FINDINGS[agent] || []);
       return findings.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+    }
+
+    // Returns the mock findings for one agent (used when its live call fails).
+    function getFallbackFindings(agent) {
+      return (FINDINGS[agent] || []).map(f => ({ ...f }));
     }
 
     // ── Renderer ───────────────────────────────────────────────────────────
