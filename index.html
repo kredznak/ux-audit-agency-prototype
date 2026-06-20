@@ -239,6 +239,14 @@
       padding: 1px 4px;
       margin-left: auto;
     }
+    .fallback-banner {
+      font-size: 11px;
+      color: var(--gray-500);
+      border: 1px solid var(--gray-300);
+      border-radius: 4px;
+      padding: 6px 10px;
+      margin-bottom: 12px;
+    }
 
     .finding-title { font-size: 14px; font-weight: 700; margin-bottom: 5px; }
     .finding-description { font-size: 13px; color: var(--gray-600); margin-bottom: 6px; line-height: 1.5; }
@@ -939,6 +947,13 @@ Rules:
       const top = findings.slice(0, VISIBLE);
       const rest = findings.slice(VISIBLE);
 
+      const fallbackAgents = [...new Set(
+        findings.filter(f => f.source === 'fallback').map(f => f.agent)
+      )];
+      const bannerHtml = fallbackAgents.length
+        ? `<div class="fallback-banner">Some findings are sample data — ${fallbackAgents.length} agent${fallbackAgents.length > 1 ? 's' : ''} couldn't complete.</div>`
+        : '';
+
       let html = `
         <div class="findings-header">
           <div class="section-label">
@@ -946,6 +961,7 @@ Rules:
           </div>
           <div class="findings-sort-label">sorted by severity</div>
         </div>
+        ${bannerHtml}
       `;
 
       top.forEach((f, i) => {
