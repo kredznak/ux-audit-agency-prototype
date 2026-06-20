@@ -405,7 +405,11 @@ Rules (follow exactly):
         return parseJson(text);
       } catch (err) {
         console.warn('Classification failed, using fallback:', err);
-        return FALLBACK_RESULT;
+        return {
+          ...FALLBACK_RESULT,
+          agents_to_spawn: [...FALLBACK_RESULT.agents_to_spawn],
+          agent_reasons: { ...FALLBACK_RESULT.agent_reasons }
+        };
       }
     }
 
@@ -602,34 +606,45 @@ Rules:
       runBtn.textContent = 'Analyzing…';
       const startTime = Date.now();
 
-      // Determine input
-      let input;
-      if (uploadedFiles.length) {
-        input = await readFileAsBase64(uploadedFiles[0]);
-      } else {
-        input = urlVal;
+      try {
+        // Determine input
+        let input;
+        if (uploadedFiles.length) {
+          input = await readFileAsBase64(uploadedFiles[0]);
+        } else {
+          input = urlVal;
+        }
+
+        // Context layer: classify the page
+        const result = await classify(input, apiKey);
+
+        if (result.fallback) {
+          document.getElementById('pageTypeLabel').textContent = 'Classification unavailable';
+        }
+
+        // Reasoning layer: drop image-only agents when there is no screenshot
+        const hasImage = typeof input === 'object' && !!input.base64;
+        const guarded = applyImageGuard(result.agents_to_spawn, hasImage);
+        ['visual', 'mobile'].forEach(a => {
+          if (result.agents_to_spawn.includes(a) && !guarded.includes(a)) {
+            result.agent_reasons[a] = 'skipped — no screenshot, visual inspection unavailable';
+          }
+        });
+        result.agents_to_spawn = guarded;
+
+        // Capability layer: kick off real agent calls, overlap with the reveal animation
+        const findingsPromise = runAgents(result.agents_to_spawn, input, apiKey);
+        await revealAgents(result);
+        const findings = await findingsPromise;
+        await revealFindings(findings);
+
+        // Show timing
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        document.getElementById('timingValue').textContent = `${elapsed}s`;
+      } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = 'Run audit';
       }
-
-      // Real Claude call
-      const result = await classify(input, apiKey);
-
-      if (result.fallback) {
-        document.getElementById('pageTypeLabel').textContent = 'Classification unavailable';
-      }
-
-      // Reveal agents sequentially
-      await revealAgents(result);
-
-      // Synthesize + reveal findings
-      const findings = synthesize(result.agents_to_spawn);
-      await revealFindings(findings);
-
-      // Show timing
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      document.getElementById('timingValue').textContent = `${elapsed}s`;
-
-      runBtn.disabled = false;
-      runBtn.textContent = 'Run audit';
     }
 
     document.getElementById('runBtn').addEventListener('click', runAudit);
@@ -867,13 +882,8 @@ Rules:
       ]
     };
 
-    // ── Synthesizer ────────────────────────────────────────────────────────
+    // ── Severity order + fallback data ─────────────────────────────────────
     const SEVERITY_ORDER = { critical: 0, major: 1, minor: 2 };
-
-    function synthesize(agentsToSpawn) {
-      const findings = agentsToSpawn.flatMap(agent => FINDINGS[agent] || []);
-      return findings.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
-    }
 
     // Returns the mock findings for one agent (used when its live call fails).
     function getFallbackFindings(agent) {
