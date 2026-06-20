@@ -644,6 +644,10 @@ Rules:
           document.getElementById('pageTypeLabel').textContent = 'Classification unavailable';
         }
 
+        // Defensive: a valid-JSON-but-incomplete model response may omit these
+        if (!Array.isArray(result.agents_to_spawn)) result.agents_to_spawn = ['heuristics'];
+        if (!result.agent_reasons || typeof result.agent_reasons !== 'object') result.agent_reasons = {};
+
         // Reasoning layer: drop image-only agents when there is no screenshot
         const hasImage = typeof input === 'object' && !!input.base64;
         const guarded = applyImageGuard(result.agents_to_spawn, hasImage);
@@ -923,7 +927,7 @@ Rules:
     }
 
     function escapeHtml(str) {
-      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
     function findingHtml(f) {
