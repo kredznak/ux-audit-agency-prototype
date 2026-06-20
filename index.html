@@ -422,6 +422,18 @@ Rules (follow exactly):
       mobile:        'Mobile / responsive'
     };
 
+    // Visual and Mobile require an actual image. On URL-only input, drop them.
+    function applyImageGuard(agents, hasImage) {
+      if (hasImage) return agents.slice();
+      return agents.filter(a => a !== 'visual' && a !== 'mobile');
+    }
+
+    // Provenance of a finding, decided by the execution path (not the agent).
+    function sourceFor(hasImage, ok) {
+      if (!ok) return 'fallback';
+      return hasImage ? 'real' : 'inferred';
+    }
+
     // ── Sequential reveal ──────────────────────────────────────────────────
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
