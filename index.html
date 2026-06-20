@@ -409,6 +409,63 @@ Rules (follow exactly):
       }
     }
 
+    async function runOneAgent(agent, input, apiKey) {
+      if (!AGENT_PROMPTS[agent]) throw new Error(`No prompt for agent: ${agent}`);
+      const instruction =
+        (typeof input === 'object' && input.base64)
+          ? 'Analyze this screenshot per the system prompt. Return JSON only.'
+          : 'Analyze this page per the system prompt. You cannot see the live page — reason from the URL and your knowledge. Return JSON only.';
+
+      const body = {
+        model: MODEL,
+        max_tokens: 1500,
+        system: AGENT_PROMPTS[agent],
+        messages: [{ role: 'user', content: buildUserContent(input, instruction) }]
+      };
+
+      const res = await fetch(CLAUDE_API, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(`Agent ${agent} API error ${res.status}`);
+      const data = await res.json();
+      const text = data.content?.[0]?.text ?? '';
+      const parsed = parseJson(text);
+      return Array.isArray(parsed.findings) ? parsed.findings : [];
+    }
+
+    async function runAgents(agents, input, apiKey) {
+      const hasImage = typeof input === 'object' && !!input.base64;
+      const KNOWN_SEVERITY = new Set(['critical', 'major', 'minor']);
+
+      const perAgent = await Promise.all(agents.map(async agent => {
+        try {
+          const findings = await runOneAgent(agent, input, apiKey);
+          const source = sourceFor(hasImage, true);
+          return findings.map(f => ({
+            ...f,
+            agent,
+            source,
+            severity: KNOWN_SEVERITY.has(f.severity) ? f.severity : 'minor'
+          }));
+        } catch (err) {
+          console.warn(`Agent ${agent} failed, using fallback:`, err);
+          const source = sourceFor(hasImage, false); // 'fallback'
+          return getFallbackFindings(agent).map(f => ({ ...f, agent, source }));
+        }
+      }));
+
+      return perAgent
+        .flat()
+        .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+    }
+
     // ── Agent display config ───────────────────────────────────────────────
     const ALL_AGENTS = ['heuristics', 'accessibility', 'visual', 'forms', 'copy', 'conversion', 'mobile'];
 
