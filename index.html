@@ -474,12 +474,15 @@ Rules (follow exactly):
         try {
           const findings = await runOneAgent(agent, input, apiKey);
           const source = sourceFor(hasImage, true);
-          return findings.map(f => ({
-            ...f,
-            agent,
-            source,
-            severity: KNOWN_SEVERITY.has(f.severity) ? f.severity : 'minor'
-          }));
+          return findings.map(f => {
+            const sev = String(f.severity || '').toLowerCase();
+            return {
+              ...f,
+              agent,
+              source,
+              severity: KNOWN_SEVERITY.has(sev) ? sev : 'minor'
+            };
+          });
         } catch (err) {
           console.warn(`Agent ${agent} failed, using fallback:`, err);
           const source = sourceFor(hasImage, false); // 'fallback'
@@ -645,8 +648,14 @@ Rules:
         }
 
         // Defensive: a valid-JSON-but-incomplete model response may omit these
+        if (typeof result.page_type !== 'string' || !result.page_type) result.page_type = 'unknown';
         if (!Array.isArray(result.agents_to_spawn)) result.agents_to_spawn = ['heuristics'];
         if (!result.agent_reasons || typeof result.agent_reasons !== 'object') result.agent_reasons = {};
+
+        // Drop any agent the model invented that we have no prompt for, so it
+        // can't vanish silently downstream. Keep heuristics as a floor.
+        result.agents_to_spawn = result.agents_to_spawn.filter(a => ALL_AGENTS.includes(a));
+        if (!result.agents_to_spawn.length) result.agents_to_spawn = ['heuristics'];
 
         // Reasoning layer: drop image-only agents when there is no screenshot
         const hasImage = typeof input === 'object' && !!input.base64;
@@ -667,6 +676,9 @@ Rules:
         // Show timing
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         document.getElementById('timingValue').textContent = `${elapsed}s`;
+      } catch (err) {
+        console.error('Audit failed:', err);
+        document.getElementById('pageTypeLabel').textContent = 'Audit failed — see console';
       } finally {
         runBtn.disabled = false;
         runBtn.textContent = 'Run audit';
