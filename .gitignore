@@ -1,2 +1,6 @@
 .DS_Store
 .claude/settings.local.json
+
+# Audit run artifacts (regenerable — produced when an audit runs)
+.playwright-mcp/
+*.png

@@ -225,6 +225,28 @@
     .severity-label.minor    { color: var(--gray-500); }
 
     .finding-category { font-size: 11px; color: var(--gray-400); }
+    .source-tag {
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--gray-400);
+      margin-left: auto;
+    }
+    .source-tag.fallback {
+      color: var(--gray-500);
+      border: 1px solid var(--gray-300);
+      border-radius: 3px;
+      padding: 1px 4px;
+      margin-left: auto;
+    }
+    .fallback-banner {
+      font-size: 11px;
+      color: var(--gray-500);
+      border: 1px solid var(--gray-300);
+      border-radius: 4px;
+      padding: 6px 10px;
+      margin-bottom: 12px;
+    }
 
     .finding-title { font-size: 14px; font-weight: 700; margin-bottom: 5px; }
     .finding-description { font-size: 13px; color: var(--gray-600); margin-bottom: 6px; line-height: 1.5; }
@@ -318,31 +340,42 @@
       page_type: 'unknown',
       agents_to_spawn: ['heuristics'],
       agent_reasons: {
-        heuristics: 'always',
+        heuristics:    'always',
         accessibility: 'skipped — classification unavailable',
-        forms: 'skipped — classification unavailable',
-        copy: 'skipped — classification unavailable'
+        visual:        'skipped — classification unavailable',
+        forms:         'skipped — classification unavailable',
+        copy:          'skipped — classification unavailable',
+        conversion:    'skipped — classification unavailable',
+        mobile:        'skipped — classification unavailable'
       },
       reasoning: 'Classification unavailable — running heuristics audit only.',
       fallback: true
     };
 
-    async function classify(input, apiKey) {
-      // input is either a URL string or a base64 object: { base64, mediaType }
+    // Build the user-content payload shared by the classifier and every agent.
+    // input is a URL string OR { base64, mediaType }. instruction is the task text.
+    function buildUserContent(input, instruction) {
       const isImage = typeof input === 'object' && input.base64;
+      if (isImage) {
+        return [
+          { type: 'image', source: { type: 'base64', media_type: input.mediaType, data: input.base64 } },
+          { type: 'text', text: instruction }
+        ];
+      }
+      return `${instruction}\n\nURL: ${input}`;
+    }
 
-      const userContent = isImage
-        ? [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: input.mediaType, data: input.base64 }
-            },
-            {
-              type: 'text',
-              text: 'Classify this UI screenshot as described in the system prompt. Return JSON only.'
-            }
-          ]
-        : `Classify this URL: ${input}`;
+    // Parse Claude's text, tolerating ```json fences.
+    function parseJson(text) {
+      const clean = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+      return JSON.parse(clean);
+    }
+
+    async function classify(input, apiKey) {
+      const instruction =
+        (typeof input === 'object' && input.base64)
+          ? 'Classify this UI screenshot as described in the system prompt. Return JSON only.'
+          : 'Classify this URL as described in the system prompt. You cannot see the live page — reason from the URL and your knowledge. Return JSON only.';
 
       const body = {
         model: MODEL,
@@ -356,18 +389,25 @@ Return this exact shape:
   "agent_reasons": {
     "heuristics": "always",
     "accessibility": "included — reason OR skipped — reason",
+    "visual": "included — reason OR skipped — reason",
     "forms": "included — reason OR skipped — reason",
-    "copy": "included — reason OR skipped — reason"
+    "copy": "included — reason OR skipped — reason",
+    "conversion": "included — reason OR skipped — reason",
+    "mobile": "included — reason OR skipped — reason"
   },
-  "reasoning": "one sentence describing the page"
+  "reasoning": "one sentence describing the page",
+  "looks_mobile": false
 }
 
 Rules (follow exactly):
-- Always include "heuristics" in agents_to_spawn
-- Include "accessibility" unless the input is a screenshot with no DOM available
+- Always include "heuristics" and "accessibility" in agents_to_spawn
+- Include "visual" whenever a screenshot image is provided
 - Include "forms" only if page_type is checkout_flow or form_page
-- Include "copy" only if page_type is landing_page`,
-        messages: [{ role: 'user', content: userContent }]
+- Include "copy" only if page_type is landing_page or content_page
+- Include "conversion" only if page_type is landing_page or checkout_flow
+- Include "mobile" only if a screenshot is provided AND it looks like a mobile/narrow viewport; also set "looks_mobile" accordingly
+- For any agent you do not include, give a one-line "skipped — reason"`,
+        messages: [{ role: 'user', content: buildUserContent(input, instruction) }]
       };
 
       try {
@@ -381,28 +421,134 @@ Rules (follow exactly):
           },
           body: JSON.stringify(body)
         });
-
         if (!res.ok) throw new Error(`API error ${res.status}`);
-
         const data = await res.json();
         const text = data.content?.[0]?.text ?? '';
-        // Strip markdown code fences if Claude wraps in them
-        const clean = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-        return JSON.parse(clean);
+        return parseJson(text);
       } catch (err) {
         console.warn('Classification failed, using fallback:', err);
-        return FALLBACK_RESULT;
+        return {
+          ...FALLBACK_RESULT,
+          agents_to_spawn: [...FALLBACK_RESULT.agents_to_spawn],
+          agent_reasons: { ...FALLBACK_RESULT.agent_reasons }
+        };
       }
     }
 
+    async function runOneAgent(agent, input, apiKey) {
+      if (!AGENT_PROMPTS[agent]) throw new Error(`No prompt for agent: ${agent}`);
+      const instruction =
+        (typeof input === 'object' && input.base64)
+          ? 'Analyze this screenshot per the system prompt. Return JSON only.'
+          : 'Analyze this page per the system prompt. You cannot see the live page — reason from the URL and your knowledge. Return JSON only.';
+
+      const body = {
+        model: MODEL,
+        max_tokens: 1500,
+        system: AGENT_PROMPTS[agent],
+        messages: [{ role: 'user', content: buildUserContent(input, instruction) }]
+      };
+
+      const res = await fetch(CLAUDE_API, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(`Agent ${agent} API error ${res.status}`);
+      const data = await res.json();
+      const text = data.content?.[0]?.text ?? '';
+      const parsed = parseJson(text);
+      return Array.isArray(parsed.findings) ? parsed.findings : [];
+    }
+
+    async function runAgents(agents, input, apiKey) {
+      const hasImage = typeof input === 'object' && !!input.base64;
+      const KNOWN_SEVERITY = new Set(['critical', 'major', 'minor']);
+
+      const perAgent = await Promise.all(agents.map(async agent => {
+        try {
+          const findings = await runOneAgent(agent, input, apiKey);
+          const source = sourceFor(hasImage, true);
+          return findings.map(f => {
+            const sev = String(f.severity || '').toLowerCase();
+            return {
+              ...f,
+              agent,
+              source,
+              severity: KNOWN_SEVERITY.has(sev) ? sev : 'minor'
+            };
+          });
+        } catch (err) {
+          console.warn(`Agent ${agent} failed, using fallback:`, err);
+          const source = sourceFor(hasImage, false); // 'fallback'
+          return getFallbackFindings(agent).map(f => ({ ...f, agent, source }));
+        }
+      }));
+
+      return perAgent
+        .flat()
+        .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+    }
+
     // ── Agent display config ───────────────────────────────────────────────
-    const ALL_AGENTS = ['heuristics', 'accessibility', 'forms', 'copy'];
+    const ALL_AGENTS = ['heuristics', 'accessibility', 'visual', 'forms', 'copy', 'conversion', 'mobile'];
 
     const AGENT_LABELS = {
       heuristics:    'Heuristics',
       accessibility: 'Accessibility',
+      visual:        'Visual / hierarchy',
       forms:         'Forms / Flow',
-      copy:          'Copy agent'
+      copy:          'Copy',
+      conversion:    'Conversion / CTA',
+      mobile:        'Mobile / responsive'
+    };
+
+    // Visual and Mobile require an actual image. On URL-only input, drop them.
+    function applyImageGuard(agents, hasImage) {
+      if (hasImage) return agents.slice();
+      return agents.filter(a => a !== 'visual' && a !== 'mobile');
+    }
+
+    // Provenance of a finding, decided by the execution path (not the agent).
+    function sourceFor(hasImage, ok) {
+      if (!ok) return 'fallback';
+      return hasImage ? 'real' : 'inferred';
+    }
+
+    const FINDING_CONTRACT = `
+
+Return ONLY raw JSON — no prose, no markdown fences — in this exact shape:
+{
+  "findings": [
+    {
+      "category": "short label for the issue type",
+      "severity": "critical | major | minor",
+      "title": "one-line problem statement",
+      "description": "2-3 sentences on the problem and its user impact",
+      "location": "where on the page this occurs",
+      "fix": "specific, actionable remedy"
+    }
+  ]
+}
+Rules:
+- Return 2 to 5 findings, most severe first.
+- "severity" MUST be exactly one of: critical, major, minor.
+- If you genuinely find no issues, return {"findings": []}.
+- If you are reasoning from a URL without seeing the live page, base findings on common patterns for this kind of page and stay appropriately cautious.`;
+
+    const AGENT_PROMPTS = {
+      heuristics: `You are a UX heuristics auditor. Evaluate the page against Nielsen's 10 usability heuristics — visibility of system status, match to the real world, user control, consistency, error prevention, recognition over recall, flexibility, minimalist design, error recovery, and help. Identify concrete usability violations.` + FINDING_CONTRACT,
+      accessibility: `You are an accessibility auditor. Evaluate the page against WCAG 2.1 AA. From a screenshot, judge color contrast, text size, touch-target size, and visible labels/focus affordances. Flag likely violations with the relevant WCAG criterion in "category".` + FINDING_CONTRACT,
+      visual: `You are a visual design auditor. Evaluate visual hierarchy, spacing and alignment, typographic scale, contrast and color use, whitespace, grid consistency, and the visual weight of primary actions. Flag where the design fights the user's eye.` + FINDING_CONTRACT,
+      forms: `You are a forms and flow auditor. Evaluate form length, field labeling, input types, inline validation, error states, progress indication, and friction in the completion flow. Flag anything that raises abandonment.` + FINDING_CONTRACT,
+      copy: `You are a UX copy auditor. Evaluate headline clarity, jargon, value-proposition strength, scannability, microcopy, and CTA verb specificity. Flag copy that is vague, product-centric instead of user-centric, or unclear.` + FINDING_CONTRACT,
+      conversion: `You are a conversion auditor. Evaluate the prominence and clarity of the primary action, presence of trust signals and social proof, risk-reversal, and friction between the user and conversion. Flag anything that suppresses conversion.` + FINDING_CONTRACT,
+      mobile: `You are a mobile/responsive auditor. Evaluate touch-target size, thumb reachability, tap spacing, viewport fit, and content density on small screens. Flag mobile-specific usability problems.` + FINDING_CONTRACT
     };
 
     // ── Sequential reveal ──────────────────────────────────────────────────
@@ -485,34 +631,58 @@ Rules (follow exactly):
       runBtn.textContent = 'Analyzing…';
       const startTime = Date.now();
 
-      // Determine input
-      let input;
-      if (uploadedFiles.length) {
-        input = await readFileAsBase64(uploadedFiles[0]);
-      } else {
-        input = urlVal;
+      try {
+        // Determine input
+        let input;
+        if (uploadedFiles.length) {
+          input = await readFileAsBase64(uploadedFiles[0]);
+        } else {
+          input = urlVal;
+        }
+
+        // Context layer: classify the page
+        const result = await classify(input, apiKey);
+
+        if (result.fallback) {
+          document.getElementById('pageTypeLabel').textContent = 'Classification unavailable';
+        }
+
+        // Defensive: a valid-JSON-but-incomplete model response may omit these
+        if (typeof result.page_type !== 'string' || !result.page_type) result.page_type = 'unknown';
+        if (!Array.isArray(result.agents_to_spawn)) result.agents_to_spawn = ['heuristics'];
+        if (!result.agent_reasons || typeof result.agent_reasons !== 'object') result.agent_reasons = {};
+
+        // Drop any agent the model invented that we have no prompt for, so it
+        // can't vanish silently downstream. Keep heuristics as a floor.
+        result.agents_to_spawn = result.agents_to_spawn.filter(a => ALL_AGENTS.includes(a));
+        if (!result.agents_to_spawn.length) result.agents_to_spawn = ['heuristics'];
+
+        // Reasoning layer: drop image-only agents when there is no screenshot
+        const hasImage = typeof input === 'object' && !!input.base64;
+        const guarded = applyImageGuard(result.agents_to_spawn, hasImage);
+        ['visual', 'mobile'].forEach(a => {
+          if (result.agents_to_spawn.includes(a) && !guarded.includes(a)) {
+            result.agent_reasons[a] = 'skipped — no screenshot, visual inspection unavailable';
+          }
+        });
+        result.agents_to_spawn = guarded;
+
+        // Capability layer: kick off real agent calls, overlap with the reveal animation
+        const findingsPromise = runAgents(result.agents_to_spawn, input, apiKey);
+        await revealAgents(result);
+        const findings = await findingsPromise;
+        await revealFindings(findings);
+
+        // Show timing
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        document.getElementById('timingValue').textContent = `${elapsed}s`;
+      } catch (err) {
+        console.error('Audit failed:', err);
+        document.getElementById('pageTypeLabel').textContent = 'Audit failed — see console';
+      } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = 'Run audit';
       }
-
-      // Real Claude call
-      const result = await classify(input, apiKey);
-
-      if (result.fallback) {
-        document.getElementById('pageTypeLabel').textContent = 'Classification unavailable';
-      }
-
-      // Reveal agents sequentially
-      await revealAgents(result);
-
-      // Synthesize + reveal findings
-      const findings = synthesize(result.agents_to_spawn);
-      await revealFindings(findings);
-
-      // Show timing
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      document.getElementById('timingValue').textContent = `${elapsed}s`;
-
-      runBtn.disabled = false;
-      runBtn.textContent = 'Run audit';
     }
 
     document.getElementById('runBtn').addEventListener('click', runAudit);
@@ -684,15 +854,78 @@ Rules (follow exactly):
           location: 'Pricing page — below plan cards',
           fix: 'Add a one-line reassurance near the CTA: "Cancel anytime. No questions asked." or "30-day money-back guarantee."'
         }
+      ],
+
+      visual: [
+        {
+          agent: 'visual',
+          category: 'Visual hierarchy',
+          severity: 'major',
+          title: 'Primary CTA has the same visual weight as secondary actions',
+          description: 'The main action does not stand out — it shares color, size, and weight with secondary links, so the eye has no clear entry point.',
+          location: 'Hero section — action row',
+          fix: 'Give the primary CTA a high-contrast solid fill and demote secondary actions to outlined or text styles.'
+        },
+        {
+          agent: 'visual',
+          category: 'Spacing & rhythm',
+          severity: 'minor',
+          title: 'Inconsistent vertical spacing between sections',
+          description: 'Section gaps vary without a clear pattern, making the page feel unstructured and harder to scan.',
+          location: 'Between content sections',
+          fix: 'Adopt a consistent spacing scale (e.g. 8px base) and apply the same section gap throughout.'
+        }
+      ],
+
+      conversion: [
+        {
+          agent: 'conversion',
+          category: 'Trust signals',
+          severity: 'major',
+          title: 'No social proof near the primary conversion point',
+          description: 'There are no testimonials, logos, ratings, or usage numbers near the CTA, so hesitant visitors have nothing to reduce perceived risk.',
+          location: 'Above and around the primary CTA',
+          fix: 'Add a row of customer logos, a star rating, or a short testimonial directly adjacent to the primary action.'
+        },
+        {
+          agent: 'conversion',
+          category: 'Risk reversal',
+          severity: 'minor',
+          title: 'Primary CTA lacks reassurance microcopy',
+          description: 'The action button gives no sense of commitment level — users do not know if they will be charged or can back out.',
+          location: 'Primary CTA',
+          fix: 'Add reassurance under the button: "No credit card required" or "Cancel anytime".'
+        }
+      ],
+
+      mobile: [
+        {
+          agent: 'mobile',
+          category: 'Touch targets',
+          severity: 'major',
+          title: 'Tap targets smaller than 44×44px',
+          description: 'Several interactive elements are below the recommended minimum touch size, making them hard to hit accurately on a phone.',
+          location: 'Navigation and inline links',
+          fix: 'Increase interactive elements to at least 44×44px and add padding around small links.'
+        },
+        {
+          agent: 'mobile',
+          category: 'Thumb reach',
+          severity: 'minor',
+          title: 'Primary action sits in the hard-to-reach top zone',
+          description: 'The main CTA is near the top of the viewport, outside the comfortable thumb zone for one-handed use.',
+          location: 'Top of mobile viewport',
+          fix: 'Consider a sticky bottom action bar for the primary CTA on small screens.'
+        }
       ]
     };
 
-    // ── Synthesizer ────────────────────────────────────────────────────────
+    // ── Severity order + fallback data ─────────────────────────────────────
     const SEVERITY_ORDER = { critical: 0, major: 1, minor: 2 };
 
-    function synthesize(agentsToSpawn) {
-      const findings = agentsToSpawn.flatMap(agent => FINDINGS[agent] || []);
-      return findings.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+    // Returns the mock findings for one agent (used when its live call fails).
+    function getFallbackFindings(agent) {
+      return (FINDINGS[agent] || []).map(f => ({ ...f }));
     }
 
     // ── Renderer ───────────────────────────────────────────────────────────
@@ -706,7 +939,7 @@ Rules (follow exactly):
     }
 
     function escapeHtml(str) {
-      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
     function findingHtml(f) {
@@ -715,6 +948,7 @@ Rules (follow exactly):
           <div class="severity-dot ${f.severity}"></div>
           <span class="severity-label ${f.severity}">${f.severity}</span>
           <span class="finding-category">${escapeHtml(f.agent)} · ${escapeHtml(f.category)}</span>
+          <span class="source-tag ${f.source}">${escapeHtml(f.source || '')}</span>
         </div>
         <div class="finding-title">${escapeHtml(f.title)}</div>
         <div class="finding-description">${escapeHtml(f.description)}</div>
@@ -729,6 +963,13 @@ Rules (follow exactly):
       const top = findings.slice(0, VISIBLE);
       const rest = findings.slice(VISIBLE);
 
+      const fallbackAgents = [...new Set(
+        findings.filter(f => f.source === 'fallback').map(f => f.agent)
+      )];
+      const bannerHtml = fallbackAgents.length
+        ? `<div class="fallback-banner">Some findings are sample data — ${fallbackAgents.length} agent${fallbackAgents.length > 1 ? 's' : ''} couldn't complete.</div>`
+        : '';
+
       let html = `
         <div class="findings-header">
           <div class="section-label">
@@ -736,6 +977,7 @@ Rules (follow exactly):
           </div>
           <div class="findings-sort-label">sorted by severity</div>
         </div>
+        ${bannerHtml}
       `;
 
       top.forEach((f, i) => {
