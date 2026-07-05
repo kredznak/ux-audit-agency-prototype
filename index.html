@@ -292,8 +292,7 @@
       <span class="topbar-subtitle">Powered by Claude</span>
     </div>
     <div class="api-key-row">
-      <span class="api-key-label">API key</span>
-      <input type="password" class="api-key-input" id="apiKey" placeholder="sk-ant-..." autocomplete="off">
+      <span class="api-key-label">Real audit · key stays on the server</span>
     </div>
   </div>
 
@@ -613,72 +612,87 @@ Rules:
       });
     }
 
+    // Prettify a subagent name from .claude/agents (e.g. "visual-hierarchy" → "Visual / Hierarchy").
+    function prettyAgent(name) {
+      return name.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' / ');
+    }
+
+    function addAgentRow(name) {
+      const agentList = document.getElementById('agentList');
+      const row = document.createElement('div');
+      row.className = 'agent-row';
+      row.innerHTML = `
+        <div class="agent-dot active"></div>
+        <span class="agent-name">${escapeHtml(prettyAgent(name))}</span>
+        <span class="agent-reason">${name === 'synthesizer' ? 'ranking & dedupe' : 'analyzing…'}</span>
+      `;
+      agentList.appendChild(row);
+      requestAnimationFrame(() => row.classList.add('visible'));
+    }
+
+    // Read a Server-Sent Events stream from a fetch Response, invoking onEvent per JSON payload.
+    async function readSse(response, onEvent) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split('\n\n');
+        buffer = chunks.pop();
+        for (const chunk of chunks) {
+          const line = chunk.split('\n').find(l => l.startsWith('data:'));
+          if (line) { try { onEvent(JSON.parse(line.slice(5).trim())); } catch {} }
+        }
+      }
+    }
+
     async function runAudit() {
-      const apiKey  = document.getElementById('apiKey').value.trim();
-      const urlVal  = document.getElementById('urlInput').value.trim();
-      const runBtn  = document.getElementById('runBtn');
+      const urlVal = document.getElementById('urlInput').value.trim();
+      const runBtn = document.getElementById('runBtn');
 
-      if (!apiKey) { alert('Please enter your Anthropic API key.'); return; }
-      if (!urlVal && !uploadedFiles.length) { alert('Please enter a URL or upload screenshots.'); return; }
-      if (urlVal && !urlVal.startsWith('http')) { alert('Please enter a full URL including https://'); return; }
+      if (uploadedFiles.length && !urlVal) {
+        alert('Server-backed audits currently take a URL. Screenshot audits are coming next.');
+        return;
+      }
+      if (!urlVal) { alert('Please enter a URL to audit.'); return; }
+      if (!urlVal.startsWith('http')) { alert('Please enter a full URL including https://'); return; }
 
-      // Reset right panel and hide old orchestrator status
+      // Reset panels and show the orchestrator status.
       renderEmptyState();
-      document.getElementById('orchestratorStatus').style.display = 'none';
-      document.getElementById('agentList').innerHTML = '';
+      const agentList = document.getElementById('agentList');
+      agentList.innerHTML = '';
+      document.getElementById('orchestratorStatus').style.display = 'block';
+      try { document.getElementById('pageTypeLabel').textContent = new URL(urlVal).host; } catch {}
+      document.getElementById('timingValue').textContent = '…';
 
       runBtn.disabled = true;
       runBtn.textContent = 'Analyzing…';
-      const startTime = Date.now();
 
       try {
-        // Determine input
-        let input;
-        if (uploadedFiles.length) {
-          input = await readFileAsBase64(uploadedFiles[0]);
-        } else {
-          input = urlVal;
-        }
+        const res = await fetch('/api/audit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: urlVal }),
+        });
+        if (!res.ok || !res.body) throw new Error(`server responded ${res.status}`);
 
-        // Context layer: classify the page
-        const result = await classify(input, apiKey);
-
-        if (result.fallback) {
-          document.getElementById('pageTypeLabel').textContent = 'Classification unavailable';
-        }
-
-        // Defensive: a valid-JSON-but-incomplete model response may omit these
-        if (typeof result.page_type !== 'string' || !result.page_type) result.page_type = 'unknown';
-        if (!Array.isArray(result.agents_to_spawn)) result.agents_to_spawn = ['heuristics'];
-        if (!result.agent_reasons || typeof result.agent_reasons !== 'object') result.agent_reasons = {};
-
-        // Drop any agent the model invented that we have no prompt for, so it
-        // can't vanish silently downstream. Keep heuristics as a floor.
-        result.agents_to_spawn = result.agents_to_spawn.filter(a => ALL_AGENTS.includes(a));
-        if (!result.agents_to_spawn.length) result.agents_to_spawn = ['heuristics'];
-
-        // Reasoning layer: drop image-only agents when there is no screenshot
-        const hasImage = typeof input === 'object' && !!input.base64;
-        const guarded = applyImageGuard(result.agents_to_spawn, hasImage);
-        ['visual', 'mobile'].forEach(a => {
-          if (result.agents_to_spawn.includes(a) && !guarded.includes(a)) {
-            result.agent_reasons[a] = 'skipped — no screenshot, visual inspection unavailable';
+        await readSse(res, (ev) => {
+          if (ev.type === 'agent') {
+            addAgentRow(ev.agent);
+          } else if (ev.type === 'findings') {
+            renderFindings(ev.findings || []);
+          } else if (ev.type === 'done') {
+            document.getElementById('timingValue').textContent = `${ev.seconds}s · $${ev.cost}`;
+          } else if (ev.type === 'error') {
+            document.getElementById('pageTypeLabel').textContent = 'Audit failed — see console';
+            console.error('Audit error:', ev.message);
           }
         });
-        result.agents_to_spawn = guarded;
-
-        // Capability layer: kick off real agent calls, overlap with the reveal animation
-        const findingsPromise = runAgents(result.agents_to_spawn, input, apiKey);
-        await revealAgents(result);
-        const findings = await findingsPromise;
-        await revealFindings(findings);
-
-        // Show timing
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        document.getElementById('timingValue').textContent = `${elapsed}s`;
       } catch (err) {
         console.error('Audit failed:', err);
-        document.getElementById('pageTypeLabel').textContent = 'Audit failed — see console';
+        document.getElementById('pageTypeLabel').textContent = 'Audit failed — is the server running?';
       } finally {
         runBtn.disabled = false;
         runBtn.textContent = 'Run audit';

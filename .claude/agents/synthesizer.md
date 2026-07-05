@@ -17,27 +17,32 @@ You are given the combined JSON findings from the other sub-agents (each matchin
 3. **Rank severity** — order the consolidated list `critical → major → minor`. Within a tier, order by user impact and how many lenses flagged it. A problem flagged by multiple agents ranks above an equally-severe single-agent one.
 4. **Demote provenance** — if every source of a merged finding is `INFERRED`, the merged finding stays `INFERRED`; if any source is `REAL`, it is `REAL`.
 
-Output a prioritized roadmap as JSON, and nothing else:
+Output the roadmap as a single JSON object, and nothing else. `findings` is already ranked (critical → major → minor, most impactful first) — the consuming UI renders it top-down:
 
 ```json
 {
   "summary": "1–2 sentences: overall state and the single most important fix",
-  "topFixes": ["ordered list of the 5 highest-impact actions, plain language"],
-  "roadmap": [
+  "counts": { "critical": 0, "major": 0, "minor": 0 },
+  "findings": [
     {
-      "rank": 1,
-      "title": "...",
       "severity": "critical | major | minor",
-      "agents": ["heuristics", "accessibility"],
-      "references": ["Nielsen #5 — Error prevention", "WCAG 2.2 3.3.1 — Error Identification"],
-      "location": "...",
-      "recommendation": "specific, actionable fix",
-      "provenance": "REAL | INFERRED",
-      "mergedFrom": 2
+      "agent": "accessibility + visual-hierarchy",
+      "category": "WCAG 2.2 1.4.3 — Contrast",
+      "title": "short problem statement",
+      "description": "the problem and its user impact, in 1–2 sentences",
+      "location": "selector, region, or screenshot area",
+      "fix": "specific, actionable recommendation",
+      "source": "real | inferred"
     }
-  ],
-  "counts": { "critical": 0, "major": 0, "minor": 0 }
+  ]
 }
 ```
+
+Field mapping when merging the sub-agents' Finding-contract items into each `findings` entry:
+- `agent` — the merged lenses that flagged it, joined with ` + ` (e.g. `accessibility + visual-hierarchy`).
+- `category` — the single most specific `reference` the merged item satisfies.
+- `description` — condense the merged `evidence` into the user impact.
+- `fix` — the strongest merged `recommendation`.
+- `source` — lowercase provenance: `real` if any merged source is REAL, else `inferred`.
 
 Be ruthless about dedup and ranking — the value of this step is a short, ordered, non-redundant list a team can act on top-down.

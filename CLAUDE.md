@@ -6,7 +6,12 @@ A single-file HTML prototype that uses Claude as a UX audit orchestrator. Open `
 
 ## How it works
 
-User pastes a URL or uploads a screenshot → real Claude API call classifies the page → agents animate in on the left → each spawned agent makes its own real Claude call and findings appear on the right sorted by severity (critical → major → minor).
+Two runtime paths share the same `index.html` UI:
+
+- **Server-backed (real audits, key stays server-side)** — run `npm run serve` and open `http://localhost:4000`. The browser POSTs a URL to `/api/audit`; `src/server.ts` runs the real Claude Agent SDK pipeline (page-inspector → lens subagents → synthesizer) and streams agent-dispatch events + structured findings back over SSE. No API key in the browser. This is the primary path.
+- **Legacy browser-direct (INFERRED, dead code)** — the original prototype reasoned from the URL string via browser-direct Claude calls with a pasted key. Those functions (`classify`, `runAgents`, `AGENT_PROMPTS`, `FINDINGS`) remain in `index.html` but are no longer wired to the Run button.
+
+In both: agents animate in on the left; findings appear on the right sorted by severity (critical → major → minor).
 
 **Agents (7):** heuristics (always), accessibility (always), visual/hierarchy (screenshot only), forms/flow (checkout/form pages), copy (landing/content pages), conversion/CTA (landing/checkout pages), mobile/responsive (mobile screenshot only). The orchestrator picks which to spawn; they run in parallel. Falls back to heuristics-only if classification fails.
 
