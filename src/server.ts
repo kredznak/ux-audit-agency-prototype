@@ -9,10 +9,12 @@
  *   npm run serve            # http://localhost:4000
  *   AUDIT_PORT=8080 npm run serve
  */
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -94,12 +96,93 @@ function screenshotPrompt(path: string): string {
   );
 }
 
-async function runAudit(prompt: string, send: (e: SseEvent) => void): Promise<void> {
+// ── Public-demo guardrails ─────────────────────────────────────────────────
+// This endpoint drives a real browser and spends real money per call, so on a
+// public URL these are load-bearing, not optional.
+const MAX_BODY_BYTES = 6 * 1024 * 1024; // cap screenshot uploads
+const RATE_WINDOW_MS = 15 * 60_000; // per-IP window
+const RATE_PER_IP = Number(process.env.AUDIT_RATE_PER_IP ?? 3);
+const MAX_CONCURRENT = Number(process.env.AUDIT_MAX_CONCURRENT ?? 1);
+const DAILY_CAP = Number(process.env.AUDIT_DAILY_CAP ?? 40); // hard spend ceiling
+const AUDIT_TIMEOUT_MS = Number(process.env.AUDIT_TIMEOUT_MS ?? 8 * 60_000);
+
+const ipHits = new Map<string, number[]>();
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const hits = (ipHits.get(ip) ?? []).filter((t) => now - t < RATE_WINDOW_MS);
+  if (hits.length >= RATE_PER_IP) {
+    ipHits.set(ip, hits);
+    return true;
+  }
+  hits.push(now);
+  ipHits.set(ip, hits);
+  return false;
+}
+
+let active = 0; // in-flight audits (concurrency guard)
+let dayKey = ""; // resets the daily counter at UTC midnight
+let dayCount = 0;
+function overDailyCap(): boolean {
+  const k = new Date().toISOString().slice(0, 10);
+  if (k !== dayKey) {
+    dayKey = k;
+    dayCount = 0;
+  }
+  return dayCount >= DAILY_CAP;
+}
+
+function clientIp(req: IncomingMessage): string {
+  const fly = req.headers["fly-client-ip"];
+  if (typeof fly === "string" && fly) return fly;
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff) return xff.split(",")[0].trim();
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+/** SSRF guard: private / loopback / link-local / metadata / CGNAT ranges. */
+function isPrivateIp(ip: string): boolean {
+  if (isIP(ip) === 4) {
+    const [a, b] = ip.split(".").map(Number);
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) || // link-local + cloud metadata (169.254.169.254)
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 100 && b >= 64 && b <= 127) // CGNAT
+    );
+  }
+  const s = ip.toLowerCase();
+  const m = s.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (m) return isPrivateIp(m[1]);
+  return s === "::1" || s === "::" || s.startsWith("fe80") || s.startsWith("fc") || s.startsWith("fd");
+}
+
+/** Only allow public http/https URLs — resolve DNS and reject internal targets. */
+async function assertPublicUrl(raw: string): Promise<void> {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error("invalid URL");
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("only http/https URLs are allowed");
+  const host = u.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal"))
+    throw new Error("private host blocked");
+  const addrs = isIP(host) ? [host] : (await lookup(host, { all: true })).map((a) => a.address);
+  if (!addrs.length) throw new Error("host did not resolve");
+  for (const a of addrs) if (isPrivateIp(a)) throw new Error("URL resolves to a private address");
+}
+
+async function runAudit(prompt: string, send: (e: SseEvent) => void, ac: AbortController): Promise<void> {
   const seen = new Set<string>();
 
   const run = query({
     prompt,
     options: {
+      abortController: ac,
       settingSources: ["project"],
       skills: ["page-inspector"],
       permissionMode: "bypassPermissions",
@@ -170,9 +253,21 @@ const server = createServer(async (req, res) => {
 
   // Run an audit, streaming events as Server-Sent Events.
   if (req.method === "POST" && req.url === "/api/audit") {
+    // Read the body with a hard size cap.
     let body = "";
-    req.on("data", (c) => (body += c));
+    let tooBig = false;
+    req.on("data", (c) => {
+      body += c;
+      if (body.length > MAX_BODY_BYTES) {
+        tooBig = true;
+        req.destroy();
+      }
+    });
     req.on("end", async () => {
+      if (tooBig) {
+        res.writeHead(413).end("payload too large");
+        return;
+      }
       let parsed: any;
       try {
         parsed = JSON.parse(body);
@@ -187,12 +282,45 @@ const server = createServer(async (req, res) => {
         return;
       }
 
+      // Guardrails — return real HTTP codes before switching to SSE.
+      const ip = clientIp(req);
+      if (rateLimited(ip)) {
+        res.writeHead(429).end("rate limit — try again later");
+        return;
+      }
+      if (active >= MAX_CONCURRENT) {
+        res.writeHead(429).end("busy — an audit is already running");
+        return;
+      }
+      if (overDailyCap()) {
+        res.writeHead(503).end("daily demo limit reached — try again tomorrow");
+        return;
+      }
+      if (url) {
+        try {
+          await assertPublicUrl(url);
+        } catch (e) {
+          res.writeHead(400).end(`blocked: ${(e as Error).message}`);
+          return;
+        }
+      }
+
+      // Commit: count this audit against the daily cap and switch to SSE.
+      dayCount++;
+      active++;
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
       });
       const send = (e: SseEvent) => res.write(`data: ${JSON.stringify(e)}\n\n`);
+
+      // Hard timeout that actually aborts the SDK run (bounds spend).
+      const ac = new AbortController();
+      const timeout = setTimeout(() => {
+        send({ type: "error", message: `audit exceeded ${Math.round(AUDIT_TIMEOUT_MS / 1000)}s — aborted` });
+        ac.abort();
+      }, AUDIT_TIMEOUT_MS);
 
       let shotPath: string | null = null;
       try {
@@ -209,10 +337,12 @@ const server = createServer(async (req, res) => {
         } else {
           prompt = urlPrompt(url);
         }
-        await runAudit(prompt, send);
+        await runAudit(prompt, send, ac);
       } catch (err) {
         send({ type: "error", message: String(err) });
       } finally {
+        clearTimeout(timeout);
+        active--;
         if (shotPath) {
           try {
             await unlink(shotPath);

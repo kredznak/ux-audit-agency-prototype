@@ -9,7 +9,8 @@
     "serve": "tsx src/server.ts"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "latest"
+    "@anthropic-ai/claude-agent-sdk": "latest",
+    "@playwright/mcp": "^0.0.77"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",

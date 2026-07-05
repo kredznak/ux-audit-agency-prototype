@@ -1,0 +1,33 @@
+# Fly.io config for the UX Audit Agency public demo.
+# Rename `app` before first deploy (or let `fly launch` set it).
+app = "ux-audit-agency"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  AUDIT_PORT = "4000"
+  # Public-demo guardrails (override per environment if needed):
+  AUDIT_DAILY_CAP = "15"       # hard ceiling on audits/day → bounds API spend (~$24 max)
+  AUDIT_MAX_CONCURRENT = "1"   # one browser+agent run at a time (memory)
+  AUDIT_RATE_PER_IP = "3"      # audits per IP per 15 min
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  # Audits run for minutes and stream over one connection — do NOT scale the
+  # machine to zero while a request is in flight, and keep at least one warm.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+  # One audit per machine at a time (matches AUDIT_MAX_CONCURRENT).
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 1
+    soft_limit = 1
+
+# Chromium + the Agent SDK are memory-hungry; 2GB is a safe floor.
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"
