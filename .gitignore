@@ -1,6 +1,9 @@
 .DS_Store
 .claude/settings.local.json
 
+# Node / Agent SDK runner
+node_modules/
+
 # Audit run artifacts (regenerable — produced when an audit runs)
 .playwright-mcp/
 *.png
