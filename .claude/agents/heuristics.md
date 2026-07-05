@@ -30,9 +30,22 @@ Evaluate against all ten heuristics:
 9. Help users recognize, diagnose, and recover from errors
 10. Help and documentation
 
+Secondary reference — **Shneiderman's Eight Golden Rules of Interface Design** (Ben Shneiderman, *Designing the User Interface*, 6th ed.): https://www.cs.umd.edu/~ben/goldenrules.html
+
+1. Strive for consistency — identical terminology and action sequences in similar situations.
+2. Seek universal usability — accommodate diverse users, ages, abilities, and expertise.
+3. Offer informative feedback — every action gets a response proportional to its importance.
+4. Design dialogs to yield closure — group action sequences into a beginning, middle, and end.
+5. Prevent errors — block serious mistakes; make recovery simple.
+6. Permit easy reversal of actions — reversible actions reduce anxiety and encourage exploration.
+7. Keep users in control — users, not the interface, initiate actions and stay in charge.
+8. Reduce short-term memory load — keep needed information visible; don't force recall between screens.
+
+Nielsen's 10 is your primary lens; reach for a Golden Rule when it names the problem more precisely.
+
 Rules:
 - Report only real, evidenced violations tied to something in the snapshot. No generic best-practice lectures.
 - One finding per distinct problem. Cite the heuristic by number and name.
 - If the snapshot came from a screenshot (no live page), mark `provenance: "INFERRED"`; otherwise `"REAL"`.
 
-Output: a JSON array of findings matching the **Finding contract** in `CLAUDE.md`, with `agent: "heuristics"` and `reference: "Nielsen #N — <name>"`. If there are no violations, return `[]`. Output the JSON array only — no prose.
+Output: a JSON array of findings matching the **Finding contract** in `CLAUDE.md`, with `agent: "heuristics"` and `reference: "Nielsen #N — <name>"` (or `"Shneiderman #N — <name>"` when a Golden Rule fits better). If there are no violations, return `[]`. Output the JSON array only — no prose.
