@@ -6,4 +6,5 @@ node_modules/
 
 # Audit run artifacts (regenerable — produced when an audit runs)
 .playwright-mcp/
+.audit-tmp/
 *.png

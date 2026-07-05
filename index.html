@@ -652,29 +652,35 @@ Rules:
       const urlVal = document.getElementById('urlInput').value.trim();
       const runBtn = document.getElementById('runBtn');
 
-      if (uploadedFiles.length && !urlVal) {
-        alert('Server-backed audits currently take a URL. Screenshot audits are coming next.');
-        return;
-      }
-      if (!urlVal) { alert('Please enter a URL to audit.'); return; }
-      if (!urlVal.startsWith('http')) { alert('Please enter a full URL including https://'); return; }
+      if (!urlVal && !uploadedFiles.length) { alert('Enter a URL or drop a screenshot to audit.'); return; }
+      if (urlVal && !urlVal.startsWith('http')) { alert('Please enter a full URL including https://'); return; }
 
       // Reset panels and show the orchestrator status.
       renderEmptyState();
       const agentList = document.getElementById('agentList');
       agentList.innerHTML = '';
       document.getElementById('orchestratorStatus').style.display = 'block';
-      try { document.getElementById('pageTypeLabel').textContent = new URL(urlVal).host; } catch {}
+      const label = urlVal
+        ? (() => { try { return new URL(urlVal).host; } catch { return urlVal; } })()
+        : `Screenshot · ${uploadedFiles[0].name}`;
+      document.getElementById('pageTypeLabel').textContent = label;
       document.getElementById('timingValue').textContent = '…';
 
       runBtn.disabled = true;
       runBtn.textContent = 'Analyzing…';
 
       try {
+        let body;
+        if (urlVal) {
+          body = { url: urlVal };
+        } else {
+          const img = await readFileAsBase64(uploadedFiles[0]);
+          body = { image: img.base64, mediaType: img.mediaType };
+        }
         const res = await fetch('/api/audit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: urlVal }),
+          body: JSON.stringify(body),
         });
         if (!res.ok || !res.body) throw new Error(`server responded ${res.status}`);
 

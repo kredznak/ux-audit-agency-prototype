@@ -10,7 +10,7 @@
  *   AUDIT_PORT=8080 npm run serve
  */
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
@@ -69,15 +69,32 @@ function normalize(payload: any): {
   return { summary: payload?.summary ?? "", counts, findings };
 }
 
-async function runAudit(target: string, send: (e: SseEvent) => void): Promise<void> {
-  const prompt =
-    `Run a UX audit of: ${target}\n\n` +
+const FINAL_JSON =
+  `Your final message MUST be the synthesizer's JSON object verbatim, inside a ` +
+  `single \`\`\`json code block — do not reformat, summarize, or add prose around it.`;
+
+function urlPrompt(url: string): string {
+  return (
+    `Run a UX audit of: ${url}\n\n` +
     `Follow the orchestration intent in CLAUDE.md exactly: inspect the page with ` +
     `the page-inspector skill (Playwright MCP), route the reasoning subagents per ` +
-    `the routing table, and run the synthesizer LAST.\n\n` +
-    `Your final message MUST be the synthesizer's JSON object verbatim, inside a ` +
-    `single \`\`\`json code block — do not reformat, summarize, or add prose around it.`;
+    `the routing table, and run the synthesizer LAST.\n\n` + FINAL_JSON
+  );
+}
 
+function screenshotPrompt(path: string): string {
+  return (
+    `Run a UX audit of this screenshot image file: ${path}\n\n` +
+    `Follow the orchestration intent in CLAUDE.md exactly. There is NO live URL — ` +
+    `do not use Playwright. Use the page-inspector skill to build a snapshot from ` +
+    `the image (source: "screenshot"); Read the image file for pixel-level detail. ` +
+    `Route the reasoning subagents per the routing table — a screenshot IS ` +
+    `available, so include visual-hierarchy, and include mobile-responsive if it ` +
+    `looks like a mobile / narrow viewport. Run the synthesizer LAST.\n\n` + FINAL_JSON
+  );
+}
+
+async function runAudit(prompt: string, send: (e: SseEvent) => void): Promise<void> {
   const seen = new Set<string>();
 
   const run = query({
@@ -156,15 +173,17 @@ const server = createServer(async (req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", async () => {
-      let url: string;
+      let parsed: any;
       try {
-        url = String(JSON.parse(body).url ?? "").trim();
+        parsed = JSON.parse(body);
       } catch {
         res.writeHead(400).end("bad JSON");
         return;
       }
-      if (!url) {
-        res.writeHead(400).end("missing url");
+      const url = String(parsed.url ?? "").trim();
+      const image = typeof parsed.image === "string" ? parsed.image : "";
+      if (!url && !image) {
+        res.writeHead(400).end("missing url or image");
         return;
       }
 
@@ -175,11 +194,30 @@ const server = createServer(async (req, res) => {
       });
       const send = (e: SseEvent) => res.write(`data: ${JSON.stringify(e)}\n\n`);
 
+      let shotPath: string | null = null;
       try {
-        await runAudit(url, send);
+        let prompt: string;
+        if (image) {
+          // Decode the uploaded screenshot to a temp file the SDK's Read tool
+          // (and the visual lenses) can open. Path in, no image blocks needed.
+          const ext = /jpe?g/.test(String(parsed.mediaType ?? "")) ? "jpg" : "png";
+          const dir = join(ROOT, ".audit-tmp");
+          await mkdir(dir, { recursive: true });
+          shotPath = join(dir, `shot-${Date.now()}.${ext}`);
+          await writeFile(shotPath, Buffer.from(image, "base64"));
+          prompt = screenshotPrompt(shotPath);
+        } else {
+          prompt = urlPrompt(url);
+        }
+        await runAudit(prompt, send);
       } catch (err) {
         send({ type: "error", message: String(err) });
       } finally {
+        if (shotPath) {
+          try {
+            await unlink(shotPath);
+          } catch {}
+        }
         res.end();
       }
     });
