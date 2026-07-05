@@ -27,6 +27,15 @@ primary_region = "sjc"
     hard_limit = 1
     soft_limit = 1
 
+  # GET / returns the UI instantly (no audit triggered). Generous timeout/grace
+  # so the check can't flap and restart the machine during a minutes-long audit.
+  [[http_service.checks]]
+    method = "GET"
+    path = "/"
+    interval = "30s"
+    timeout = "10s"
+    grace_period = "20s"
+
 # Chromium + the Agent SDK are memory-hungry; 2GB is a safe floor.
 [[vm]]
   size = "shared-cpu-2x"
