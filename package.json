@@ -1,0 +1,20 @@
+{
+  "name": "ux-audit-agency",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "UX audit orchestrator — Claude Agent SDK runner over the .claude/ agent + skill definitions",
+  "scripts": {
+    "audit": "tsx src/audit.ts",
+    "serve": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest",
+    "@playwright/mcp": "^0.0.77"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

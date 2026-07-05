@@ -1,0 +1,9 @@
+node_modules
+.git
+.audit-tmp
+.playwright-mcp
+*.png
+docs
+.claude/skills/skill-evaluator
+subagents-report.html
+SKILL.md
