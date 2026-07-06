@@ -28,6 +28,14 @@ COPY src ./src
 COPY index.html CLAUDE.md .mcp.json ./
 COPY .claude ./.claude
 
+# Run as non-root: Claude Code refuses --dangerously-skip-permissions (which
+# permissionMode:'bypassPermissions' uses) under root/sudo. The `node` user
+# ships with the base image (uid 1000). Give it /app (writes .audit-tmp) and
+# read/exec on the browser cache.
+RUN chown -R node:node /app && chmod -R a+rx /ms-playwright
+ENV HOME=/home/node
+USER node
+
 EXPOSE 4000
 ENV AUDIT_PORT=4000
 
