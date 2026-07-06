@@ -10,11 +10,11 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "latest",
-    "@playwright/mcp": "^0.0.77"
+    "@playwright/mcp": "^0.0.77",
+    "tsx": "latest"
   },
   "devDependencies": {
     "@types/node": "^26.1.0",
-    "tsx": "latest",
     "typescript": "latest"
   }
 }
