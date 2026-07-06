@@ -21,11 +21,15 @@ primary_region = "sjc"
   auto_stop_machines = "suspend"
   auto_start_machines = true
   min_machines_running = 1
-  # One audit per machine at a time (matches AUDIT_MAX_CONCURRENT).
+  # Fly's routing capacity — NOT the audit limit. Kept well above 1 so the
+  # health check and UI get through while an audit holds a connection for
+  # minutes. The app enforces one-audit-at-a-time itself (AUDIT_MAX_CONCURRENT),
+  # returning a fast 429 for extras. hard_limit=1 here starved the health
+  # check and got the machine restarted mid-audit.
   [http_service.concurrency]
     type = "requests"
-    hard_limit = 1
-    soft_limit = 1
+    hard_limit = 20
+    soft_limit = 15
 
   # GET / returns the UI instantly (no audit triggered). Generous timeout/grace
   # so the check can't flap and restart the machine during a minutes-long audit.
