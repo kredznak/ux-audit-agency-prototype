@@ -420,6 +420,9 @@
           if (ev.type === 'agent') {
             addAgentRow(ev.agent);
           } else if (ev.type === 'findings') {
+            // Synthesis is done → every dispatched agent has finished.
+            document.querySelectorAll('#agentList .agent-reason')
+              .forEach(el => el.textContent = 'done');
             renderFindings(ev.findings || []);
           } else if (ev.type === 'done') {
             document.getElementById('timingValue').textContent = `${ev.seconds}s · $${ev.cost}`;
@@ -494,7 +497,7 @@
       `;
 
       top.forEach((f, i) => {
-        html += `<div class="finding-row" id="finding-${i}">${findingHtml(f)}</div>`;
+        html += `<div class="finding-row visible" id="finding-${i}">${findingHtml(f)}</div>`;
       });
 
       if (rest.length) {
