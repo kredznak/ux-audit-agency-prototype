@@ -315,6 +315,15 @@ const server = createServer(async (req, res) => {
       });
       const send = (e: SseEvent) => res.write(`data: ${JSON.stringify(e)}\n\n`);
 
+      // SSE keepalive: audits have long quiet stretches (page inspection, a slow
+      // subagent) with no events. A comment line every 15s keeps the connection
+      // active so the Fly proxy doesn't treat it as idle and drop it.
+      const heartbeat = setInterval(() => {
+        try {
+          res.write(": ping\n\n");
+        } catch {}
+      }, 15_000);
+
       // Hard timeout that actually aborts the SDK run (bounds spend).
       const ac = new AbortController();
       const timeout = setTimeout(() => {
@@ -342,6 +351,7 @@ const server = createServer(async (req, res) => {
         send({ type: "error", message: String(err) });
       } finally {
         clearTimeout(timeout);
+        clearInterval(heartbeat);
         active--;
         if (shotPath) {
           try {
