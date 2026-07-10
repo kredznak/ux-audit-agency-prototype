@@ -140,6 +140,26 @@
     }
     .run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .run-btn:hover:not(:disabled) { opacity: 0.85; }
+    /* Busy state: stay full-black (not faded) and sweep a shimmer so it reads as
+       actively working. Placed after :disabled so it wins on equal specificity. */
+    .run-btn.busy {
+      opacity: 1;
+      cursor: progress;
+      position: relative;
+      overflow: hidden;
+    }
+    .run-btn.busy::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(100deg, transparent 25%, rgba(255,255,255,0.22) 50%, transparent 75%);
+      transform: translateX(-100%);
+      animation: run-shimmer 1.15s ease-in-out infinite;
+    }
+    @keyframes run-shimmer { to { transform: translateX(100%); } }
+    @media (prefers-reduced-motion: reduce) {
+      .run-btn.busy::after { animation: none; }
+    }
 
     /* ── Orchestrator status (shown after audit) ── */
     #orchestratorStatus { display: none; }
@@ -399,6 +419,7 @@
       document.getElementById('timingValue').textContent = '…';
 
       runBtn.disabled = true;
+      runBtn.classList.add('busy');
       runBtn.textContent = 'Analyzing…';
 
       try {
@@ -436,6 +457,7 @@
         document.getElementById('pageTypeLabel').textContent = 'Audit failed — is the server running?';
       } finally {
         runBtn.disabled = false;
+        runBtn.classList.remove('busy');
         runBtn.textContent = 'Run audit';
       }
     }
