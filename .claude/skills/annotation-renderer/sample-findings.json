@@ -1,0 +1,59 @@
+{
+  "screenshot_path": "example-com-full.png",
+  "viewport": { "width": 1200, "height": 742, "scroll_height": 742 },
+  "landmarks": {
+    "main": { "x": 240, "y": 100, "width": 680, "height": 140 }
+  },
+  "findings": [
+    {
+      "rank": 1,
+      "severity": "high",
+      "agent": "accessibility",
+      "issue": "Link text \"Learn more\" is not descriptive out of context",
+      "location": {
+        "type": "bbox",
+        "x": 240, "y": 210, "width": 82, "height": 20,
+        "selector": "p > a"
+      }
+    },
+    {
+      "rank": 2,
+      "severity": "medium",
+      "agent": "visual-hierarchy",
+      "issue": "Body copy line length exceeds a comfortable reading measure",
+      "location": {
+        "type": "bbox",
+        "x": 240, "y": 155, "width": 662, "height": 42,
+        "selector": "main > p"
+      }
+    },
+    {
+      "rank": 3,
+      "severity": "medium",
+      "agent": "copy",
+      "issue": "Heading does not convey the page's purpose to a first-time visitor",
+      "location": {
+        "type": "bbox",
+        "x": 240, "y": 113, "width": 186, "height": 30,
+        "selector": "h1"
+      }
+    },
+    {
+      "rank": 4,
+      "severity": "low",
+      "agent": "heuristics",
+      "issue": "Page offers no navigation, search, or wayfinding of any kind",
+      "location": {
+        "type": "region",
+        "region": "main"
+      }
+    },
+    {
+      "rank": 5,
+      "severity": "low",
+      "agent": "conversion-cta",
+      "issue": "No clear primary call-to-action or next-step conversion path",
+      "location": null
+    }
+  ]
+}
