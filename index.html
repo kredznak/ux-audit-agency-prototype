@@ -247,6 +247,8 @@
     .view-toggle button + button { border-left: 1px solid var(--gray-200); }
     .view-toggle button.on { background: var(--gray-100); color: var(--black); font-weight: 600; }
     .finding-row.hidden { display: none !important; }
+    .finding-row.show-pinned { display: block !important; }
+    .show-more-btn.filtered-hidden { display: none !important; }
     .finding-row.linkable { cursor: pointer; }
     .finding-row.active { background: var(--gray-50); }
     .np-tag { font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--gray-400);
@@ -672,11 +674,14 @@
           toggle.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
           const pageOnly = btn.dataset.view === 'page';
           document.querySelectorAll('.finding-row').forEach(r => {
-            const shown = !pageOnly || pinnedRanks.has(Number(r.getAttribute('data-f')));
-            r.classList.toggle('hidden', !shown);
+            const pinned = pinnedRanks.has(Number(r.getAttribute('data-f')));
+            // On-page view: force every pinned row visible (overrides the show-more
+            // inline display:none on rows past the fold) and hide the non-pinned ones.
+            r.classList.toggle('hidden', pageOnly && !pinned);
+            r.classList.toggle('show-pinned', pageOnly && pinned);
           });
           const more = document.getElementById('showMoreBtn');
-          if (more) more.classList.toggle('hidden', pageOnly);
+          if (more) more.classList.toggle('filtered-hidden', pageOnly);
         });
       });
     }
