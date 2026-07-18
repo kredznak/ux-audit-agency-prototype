@@ -40,13 +40,14 @@ LEGEND_ROW_H = 26
 LEGEND_PAD = 16
 LEGEND_TITLE_MAX = 60
 
-# Severity -> (pin fill, number color). Amber uses a dark number for contrast.
+# Severity -> (pin fill, number color). Matches index.html tokens.
 SEV_COLORS = {
-    "high":   ((0xD6, 0x2D, 0x4A), (0xFF, 0xFF, 0xFF)),
-    "medium": ((0xE8, 0x9B, 0x1E), (0x20, 0x20, 0x20)),
-    "low":    ((0x6B, 0x72, 0x80), (0xFF, 0xFF, 0xFF)),
+    "critical": ((0xDC, 0x26, 0x26), (0xFF, 0xFF, 0xFF)),
+    "major":    ((0xD9, 0x77, 0x06), (0xFF, 0xFF, 0xFF)),
+    "minor":    ((0x6B, 0x72, 0x80), (0xFF, 0xFF, 0xFF)),
 }
-DEFAULT_SEV = "low"
+DEFAULT_SEV = "minor"
+PIN_ELIGIBLE = {"critical", "major"}   # minor findings are never pinned
 
 # macOS / cross-platform truetype fallbacks; Pillow default is last resort.
 FONT_CANDIDATES = [
@@ -124,42 +125,39 @@ def draw_pin(draw, cx, cy, number, fill, num_color, font):
     draw.text((cx - (r - l) / 2 - l, cy - (b - t) / 2 - t), label, fill=num_color, font=font)
 
 
-def main():
-    if len(sys.argv) < 3:
-        print("usage: python3 render.py <screenshot_path> <findings_json>", file=sys.stderr)
-        sys.exit(2)
-
-    shot_path = Path(sys.argv[1])
-    spec = json.loads(Path(sys.argv[2]).read_text())
+def render(spec, screenshot_path):
     viewport = spec.get("viewport", {})
     landmarks = spec.get("landmarks", {})
+    normalized = bool(spec.get("normalized", False))
     findings = spec["findings"]
-
-    # Ranking must be final: every finding needs a rank.
     if any("rank" not in f for f in findings):
-        print(json.dumps({"error": "findings are unranked — rank is assigned by the synthesizer, not here"}))
-        sys.exit(1)
+        raise ValueError("findings are unranked — rank is assigned by the synthesizer, not here")
     findings = sorted(findings, key=lambda f: f["rank"])
 
-    base = Image.open(shot_path).convert("RGBA")
-    viewport_w = float(viewport.get("width", base.width))
+    base = Image.open(screenshot_path).convert("RGBA")
+    vw, vh = base.width, base.height
 
-    # 1. Validate locations.
-    placed, unplaced = [], []
+    def scaled(bbox):
+        x, y, w, h = bbox
+        return (x * vw, y * vh, w * vw, h * vh) if normalized else bbox
+
+    placed, unplaced, skipped = [], [], []
     for f in findings:
+        sev = sev_key(f)
+        if sev not in PIN_ELIGIBLE:
+            skipped.append({"rank": f["rank"], "severity": sev})
+            continue
         bbox = resolve_bbox(f, landmarks)
         if bbox is None:
             unplaced.append({"rank": f["rank"], "reason": "no resolvable location"})
         else:
-            placed.append((f, bbox))
+            placed.append((f, scaled(bbox)))
 
-    # 2 + 3. Anchors, then declutter in rank order.
+    viewport_w = float(viewport.get("width", vw))
     anchors = declutter([anchor_point(b, viewport_w) for _, b in placed])
-    # Keep every pin fully on-canvas (a top/left-edge element can push it off).
     anchors = [(min(max(cx, PIN_R), base.width - PIN_R),
                 min(max(cy, PIN_R), base.height - PIN_R)) for cx, cy in anchors]
 
-    # 4. Draw outlines (alpha overlay) then pins on a copy.
     overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
     odraw = ImageDraw.Draw(overlay)
     for (f, bbox), _ in zip(placed, anchors):
@@ -175,11 +173,10 @@ def main():
         fill, num_color = SEV_COLORS[sev_key(f)]
         draw_pin(draw, cx, cy, f["rank"], fill, num_color, pin_font)
         pins.append({"rank": f["rank"], "x": round(cx), "y": round(cy),
-                     "severity": f.get("severity", DEFAULT_SEV), "clustered": False})
+                     "severity": sev_key(f), "clustered": False})
 
-    # 5. Legend strip along the bottom.
     legend_font = load_font(14)
-    legend_h = LEGEND_PAD * 2 + LEGEND_ROW_H * len(placed)
+    legend_h = LEGEND_PAD * 2 + LEGEND_ROW_H * max(len(placed), 1)
     out = Image.new("RGBA", (canvas.width, canvas.height + legend_h), (255, 255, 255, 255))
     out.paste(canvas, (0, 0))
     ld = ImageDraw.Draw(out)
@@ -187,7 +184,6 @@ def main():
     ry = canvas.height + LEGEND_PAD
     for f, _ in placed:
         fill = SEV_COLORS[sev_key(f)][0]
-        # pin number chip
         ld.ellipse([LEGEND_PAD, ry, LEGEND_PAD + 20, ry + 20], fill=fill)
         n = str(f["rank"])
         l, t, rr, bb = ld.textbbox((0, 0), n, font=legend_font)
@@ -199,16 +195,24 @@ def main():
         ld.text((LEGEND_PAD + 32, ry + 3), title, fill=(0x20, 0x20, 0x20), font=legend_font)
         ry += LEGEND_ROW_H
 
-    out_path = shot_path.with_suffix(".annotated.png")
+    out_path = Path(screenshot_path).with_suffix(".annotated.png")
     out.convert("RGB").save(out_path)
-
-    manifest = {
+    return {
         "annotated_screenshot_path": str(out_path),
-        "original_screenshot_path": str(shot_path),
-        "pins": pins,
-        "clusters": [],
-        "unplaced": unplaced,
+        "original_screenshot_path": str(screenshot_path),
+        "pins": pins, "clusters": [], "unplaced": unplaced, "skipped": skipped,
     }
+
+
+def main():
+    if len(sys.argv) < 3:
+        print("usage: python3 render.py <screenshot_path> <findings_json>", file=sys.stderr)
+        sys.exit(2)
+    spec = json.loads(Path(sys.argv[2]).read_text())
+    try:
+        manifest = render(spec, sys.argv[1])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)})); sys.exit(1)
     print(json.dumps(manifest, indent=2))
 
 

@@ -7,7 +7,7 @@
   "findings": [
     {
       "rank": 1,
-      "severity": "high",
+      "severity": "critical",
       "agent": "accessibility",
       "issue": "Link text \"Learn more\" is not descriptive out of context",
       "location": {
@@ -18,7 +18,7 @@
     },
     {
       "rank": 2,
-      "severity": "medium",
+      "severity": "major",
       "agent": "visual-hierarchy",
       "issue": "Body copy line length exceeds a comfortable reading measure",
       "location": {
@@ -29,7 +29,7 @@
     },
     {
       "rank": 3,
-      "severity": "medium",
+      "severity": "major",
       "agent": "copy",
       "issue": "Heading does not convey the page's purpose to a first-time visitor",
       "location": {
@@ -40,7 +40,7 @@
     },
     {
       "rank": 4,
-      "severity": "low",
+      "severity": "minor",
       "agent": "heuristics",
       "issue": "Page offers no navigation, search, or wayfinding of any kind",
       "location": {
@@ -50,7 +50,7 @@
     },
     {
       "rank": 5,
-      "severity": "low",
+      "severity": "minor",
       "agent": "conversion-cta",
       "issue": "No clear primary call-to-action or next-step conversion path",
       "location": null
