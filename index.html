@@ -484,8 +484,8 @@
             // Synthesis is done → every dispatched agent has finished.
             document.querySelectorAll('#agentList .agent-reason')
               .forEach(el => el.textContent = 'done');
-            renderFindings(ev.findings || []);
             renderAnnotated(ev.findings || []);
+            renderFindings(ev.findings || []);
           } else if (ev.type === 'done') {
             document.getElementById('timingValue').textContent = `${ev.seconds}s · $${ev.cost}`;
           } else if (ev.type === 'error') {
