@@ -32,7 +32,7 @@ change is cheap but confusing mid-flow.
 ```json
 {
   "rank": 1,
-  "severity": "high",
+  "severity": "critical",
   "agent": "accessibility",
   "issue": "string",
   "location": {
@@ -65,11 +65,13 @@ with the region's bbox resolved from page-inspector's landmark data).
 4. **Draw.** For each finding, on a copy of the screenshot (never mutate the
    original):
    - A filled circle pin (28px diameter) with the rank number centered.
-   - Pin color by severity: high = red family, medium = amber family,
-     low = neutral gray. Use accessible contrast for the number.
+   - Pin color by severity: critical = red family, major = amber family,
+     minor = neutral gray. Use accessible contrast for the number.
    - A 2px outline stroke around the finding's bbox in the same severity
      color at 60% opacity, so the pin shows *where* and the outline shows
      *what extent*.
+   - Only critical and major findings are pinned; minor findings are recorded
+     in `skipped[]` and never drawn.
 
 5. **Render a legend strip** along the bottom or right edge: pin number,
    severity dot, and truncated issue title (max 60 chars), in rank order.
@@ -84,19 +86,25 @@ with the region's bbox resolved from page-inspector's landmark data).
   "annotated_screenshot_path": "string",
   "original_screenshot_path": "string",
   "pins": [
-    { "rank": 1, "x": 0, "y": 0, "severity": "high", "clustered": false }
+    { "rank": 1, "x": 0, "y": 0, "severity": "critical", "clustered": false }
   ],
   "clusters": [
     { "ranks": [3, 4, 5], "x": 0, "y": 0 }
   ],
   "unplaced": [
     { "rank": 7, "reason": "no resolvable location" }
+  ],
+  "skipped": [
+    { "rank": 8, "severity": "minor" }
   ]
 }
 ```
 
 `unplaced` findings still appear in the text report — they are simply listed
 under the image as "not shown" rather than silently dropped or guessed.
+
+`skipped` lists findings that were not pinned because their severity is below
+the critical/major threshold — minor findings are never drawn on the image.
 
 ## Implementation notes
 
