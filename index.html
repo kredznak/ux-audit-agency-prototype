@@ -451,6 +451,7 @@
       try {
         let body;
         if (urlVal) {
+          window.auditImageUrl = null;   // URL audits have no client-side screenshot to annotate
           body = { url: urlVal };
         } else {
           const img = await readFileAsBase64(uploadedFiles[0]);
