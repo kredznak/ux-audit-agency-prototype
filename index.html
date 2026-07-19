@@ -71,11 +71,36 @@
       overflow-y: auto;
     }
 
-    .right-panel {
-      flex: 1;
-      padding: 24px;
-      overflow-y: auto;
+    .center-panel { flex: 1; padding: 24px; overflow-y: auto; min-width: 0; }
+    .annot-panel {
+      width: 460px; flex-shrink: 0; border-left: 1px solid var(--gray-100);
+      padding: 24px; overflow-y: auto; display: none;
     }
+    .annot-panel.visible { display: block; }
+    .annot-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+    .annot-note { font-size: 11px; color: var(--gray-400); margin-top: 12px; line-height: 1.4; }
+    .annot-note b { color: var(--gray-600); font-weight: 600; }
+    .shot { position: relative; width: 100%; border: 1px solid var(--gray-200); border-radius: 10px; overflow: hidden; }
+    .shot img { display: block; width: 100%; height: auto; }
+    .pin {
+      position: absolute; width: 26px; height: 26px; border-radius: 50%; transform: translate(-50%, -50%);
+      display: grid; place-items: center; color: var(--white); font-size: 13px; font-weight: 700;
+      border: 2px solid var(--white); box-shadow: 0 2px 6px rgba(0,0,0,0.3); cursor: pointer; z-index: 3;
+      transition: transform 0.15s;
+    }
+    .pin.critical { background: var(--red); }
+    .pin.major    { background: var(--amber); }
+    .pinbox {
+      position: absolute; border: 2px solid; border-radius: 4px; opacity: 0.55; z-index: 2;
+      pointer-events: none; transition: opacity 0.15s;
+    }
+    .pinbox.critical { border-color: var(--red); }
+    .pinbox.major    { border-color: var(--amber); }
+    .pin.on { transform: translate(-50%, -50%) scale(1.18); box-shadow: 0 0 0 6px rgba(220,38,38,0.16), 0 4px 10px rgba(0,0,0,0.32); z-index: 5; }
+    .pin.major.on { box-shadow: 0 0 0 6px rgba(217,119,6,0.18), 0 4px 10px rgba(0,0,0,0.32); }
+    .pinbox.on { opacity: 1; }
+    @media (max-width: 1180px) { .annot-panel { width: 100%; border-left: none; border-top: 1px solid var(--gray-100); } }
+    @media (prefers-reduced-motion: reduce) { .pin, .pinbox { transition: none; } }
 
     /* ── Shared typography ── */
     .section-label {
@@ -214,6 +239,21 @@
     .findings-count { color: var(--gray-300); font-weight: 400; margin-left: 6px; }
     .findings-sort-label { font-size: 11px; color: var(--gray-400); }
 
+    .view-toggle { display: inline-flex; border: 1px solid var(--gray-200); border-radius: 6px; overflow: hidden; }
+    .view-toggle button {
+      font-family: var(--font); font-size: 11px; color: var(--gray-500); background: none; border: none;
+      padding: 5px 10px; cursor: pointer;
+    }
+    .view-toggle button + button { border-left: 1px solid var(--gray-200); }
+    .view-toggle button.on { background: var(--gray-100); color: var(--black); font-weight: 600; }
+    .finding-row.hidden { display: none !important; }
+    .finding-row.show-pinned { display: block !important; opacity: 1 !important; transform: none !important; }
+    .show-more-btn.filtered-hidden { display: none !important; }
+    .finding-row.linkable { cursor: pointer; }
+    .finding-row.active { background: var(--gray-50); }
+    .np-tag { font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--gray-400);
+      border: 1px solid var(--gray-200); border-radius: 3px; padding: 1px 5px; margin-left: auto; }
+
     .finding-row {
       border-top: 1px solid var(--gray-100);
       padding: 16px 0;
@@ -347,7 +387,8 @@
       </div>
 
     </div>
-    <div class="right-panel" id="rightPanel"></div>
+    <div class="center-panel" id="rightPanel"></div>
+    <div class="annot-panel" id="annotatedPanel"></div>
   </div>
 
   <script>
@@ -425,6 +466,7 @@
       try {
         let body;
         if (urlVal) {
+          window.auditImageUrl = null;   // URL audits have no client-side screenshot to annotate
           body = { url: urlVal };
         } else {
           const img = await readFileAsBase64(uploadedFiles[0]);
@@ -444,12 +486,15 @@
             // Synthesis is done → every dispatched agent has finished.
             document.querySelectorAll('#agentList .agent-reason')
               .forEach(el => el.textContent = 'done');
+            renderAnnotated(ev.findings || []);
             renderFindings(ev.findings || []);
           } else if (ev.type === 'done') {
             document.getElementById('timingValue').textContent = `${ev.seconds}s · $${ev.cost}`;
           } else if (ev.type === 'error') {
             document.getElementById('pageTypeLabel').textContent = 'Audit failed — see console';
             console.error('Audit error:', ev.message);
+          } else if (ev.type === 'note') {
+            console.info('Audit note:', ev.message);
           }
         });
       } catch (err) {
@@ -480,13 +525,16 @@
       return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
-    function findingHtml(f) {
+    function findingHtml(f, pinnedRank) {
+      const tag = pinnedRank
+        ? `<span class="source-tag">pin ${pinnedRank}</span>`
+        : (PINNABLE.includes(f.severity) ? `<span class="np-tag">not on page</span>` : `<span class="source-tag ${f.source}">${escapeHtml(f.source || '')}</span>`);
       return `
         <div class="finding-meta">
           <div class="severity-dot ${f.severity}"></div>
           <span class="severity-label ${f.severity}">${f.severity}</span>
           <span class="finding-category">${escapeHtml(f.agent)} · ${escapeHtml(f.category)}</span>
-          <span class="source-tag ${f.source}">${escapeHtml(f.source || '')}</span>
+          ${tag}
         </div>
         <div class="finding-title">${escapeHtml(f.title)}</div>
         <div class="finding-description">${escapeHtml(f.description)}</div>
@@ -495,11 +543,48 @@
       `;
     }
 
+    const PINNABLE = ['critical', 'major'];
+
+    function renderAnnotated(findings) {
+      const panel = document.getElementById('annotatedPanel');
+      // Only screenshot audits have a client-side image to annotate.
+      if (!window.auditImageUrl) { panel.classList.remove('visible'); panel.innerHTML = ''; return; }
+
+      const pinned = findings
+        .map((f, i) => ({ f, rank: i + 1 }))
+        .filter(({ f }) => PINNABLE.includes(f.severity) && f.bbox);
+
+      const pinsHtml = pinned.map(({ f, rank }) => {
+        const b = f.bbox;
+        const cx = (b.x + b.width / 2) * 100, cy = (b.y + b.height / 2) * 100;
+        return `
+          <div class="pinbox ${f.severity}" data-p="${rank}"
+               style="left:${b.x * 100}%;top:${b.y * 100}%;width:${b.width * 100}%;height:${b.height * 100}%"></div>
+          <div class="pin ${f.severity}" data-p="${rank}" style="left:${cx}%;top:${cy}%">${rank}</div>`;
+      }).join('');
+
+      panel.innerHTML = `
+        <div class="annot-head">
+          <div class="section-label">Annotated page</div>
+          <div class="findings-sort-label">pin # = finding #</div>
+        </div>
+        <div class="shot" id="shot">
+          <img src="${window.auditImageUrl}" alt="Audited screenshot">
+          ${pinsHtml}
+        </div>
+        <div class="annot-note">Pins mark <b>critical &amp; major</b> findings only · minors stay in the list</div>`;
+      panel.classList.add('visible');
+    }
+
     function renderFindings(findings) {
       const panel = document.getElementById('rightPanel');
       const VISIBLE = 5;
       const top = findings.slice(0, VISIBLE);
       const rest = findings.slice(VISIBLE);
+      const pinnedRanks = new Set(findings
+        .map((f, i) => (PINNABLE.includes(f.severity) && f.bbox ? i + 1 : null))
+        .filter(Boolean));
+      const rankOf = (f) => findings.indexOf(f) + 1;
 
       const fallbackAgents = [...new Set(
         findings.filter(f => f.source === 'fallback').map(f => f.agent)
@@ -513,18 +598,21 @@
           <div class="section-label">
             Findings <span class="findings-count">${findings.length} total</span>
           </div>
-          <div class="findings-sort-label">sorted by severity</div>
+          <div class="view-toggle" id="viewToggle">
+            <button class="on" data-view="all">All</button>
+            <button data-view="page">On page <span id="onPageCount"></span></button>
+          </div>
         </div>
         ${bannerHtml}
       `;
 
       top.forEach((f, i) => {
-        html += `<div class="finding-row visible" id="finding-${i}">${findingHtml(f)}</div>`;
+        html += `<div class="finding-row visible" id="finding-${i}" data-f="${i + 1}">${findingHtml(f, pinnedRanks.has(rankOf(f)) ? rankOf(f) : null)}</div>`;
       });
 
       if (rest.length) {
         const restHtml = rest.map((f, i) =>
-          `<div class="finding-row" id="finding-${VISIBLE + i}" style="display:none">${findingHtml(f)}</div>`
+          `<div class="finding-row" id="finding-${VISIBLE + i}" data-f="${VISIBLE + i + 1}" style="display:none">${findingHtml(f, pinnedRanks.has(rankOf(f)) ? rankOf(f) : null)}</div>`
         ).join('');
         html += restHtml;
         html += `<button class="show-more-btn" id="showMoreBtn">+ ${rest.length} more finding${rest.length > 1 ? 's' : ''}</button>`;
@@ -547,6 +635,55 @@
             : `+ ${rest.length} more finding${rest.length > 1 ? 's' : ''}`;
         });
       }
+
+      document.getElementById('onPageCount').textContent = pinnedRanks.size;
+      wireAnnotationLinks(pinnedRanks);
+    }
+
+    function setLinkActive(rank, on) {
+      document.querySelectorAll(`[data-f="${rank}"]`).forEach(e => e.classList.toggle('active', on));
+      document.querySelectorAll(`[data-p="${rank}"]`).forEach(e => e.classList.toggle('on', on));
+    }
+
+    function wireAnnotationLinks(pinnedRanks) {
+      pinnedRanks.forEach(rank => {
+        const row = document.querySelector(`.finding-row[data-f="${rank}"]`);
+        if (row) {
+          row.classList.add('linkable');
+          row.addEventListener('mouseenter', () => setLinkActive(rank, true));
+          row.addEventListener('mouseleave', () => setLinkActive(rank, false));
+          row.addEventListener('click', () => {
+            document.querySelector(`.pin[data-p="${rank}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            setLinkActive(rank, true);
+          });
+        }
+      });
+      document.querySelectorAll('.pin[data-p]').forEach(pin => {
+        const rank = pin.getAttribute('data-p');
+        pin.addEventListener('mouseenter', () => setLinkActive(rank, true));
+        pin.addEventListener('mouseleave', () => setLinkActive(rank, false));
+        pin.addEventListener('click', () => {
+          document.querySelector(`.finding-row[data-f="${rank}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          setLinkActive(rank, true);
+        });
+      });
+
+      const toggle = document.getElementById('viewToggle');
+      if (toggle) toggle.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          toggle.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === btn));
+          const pageOnly = btn.dataset.view === 'page';
+          document.querySelectorAll('.finding-row').forEach(r => {
+            const pinned = pinnedRanks.has(Number(r.getAttribute('data-f')));
+            // On-page view: force every pinned row visible (overrides the show-more
+            // inline display:none on rows past the fold) and hide the non-pinned ones.
+            r.classList.toggle('hidden', pageOnly && !pinned);
+            r.classList.toggle('show-pinned', pageOnly && pinned);
+          });
+          const more = document.getElementById('showMoreBtn');
+          if (more) more.classList.toggle('filtered-hidden', pageOnly);
+        });
+      });
     }
 
     // Init empty state on load
@@ -578,6 +715,8 @@
       const images = files.filter(f => f.type.startsWith('image/'));
       if (!images.length) return;
       uploadedFiles = images;
+      if (window.auditImageUrl) URL.revokeObjectURL(window.auditImageUrl);
+      window.auditImageUrl = URL.createObjectURL(images[0]);
       dropLabel.textContent = `${images.length} screenshot${images.length > 1 ? 's' : ''} ready`;
       dropZone.classList.add('has-file');
       document.getElementById('urlInput').value = '';

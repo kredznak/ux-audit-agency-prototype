@@ -16,20 +16,12 @@ import { dirname, join } from "node:path";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { locate, attachBboxes, extractJson, type NormBbox } from "./locator.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.AUDIT_PORT ?? 4000);
 
 type SseEvent = { type: string; [k: string]: unknown };
-
-/** Pull the last ```json fenced block (or a bare object) out of the model's final text. */
-function extractJson(text: string): any {
-  const fences = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
-  const candidate = fences.length
-    ? fences[fences.length - 1][1]
-    : text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-  return JSON.parse(candidate.trim());
-}
 
 const SEVERITIES = new Set(["critical", "major", "minor"]);
 
@@ -39,7 +31,7 @@ const SEVERITIES = new Set(["critical", "major", "minor"]);
  * / fix / source) and the reasoning contract (`roadmap` / reference / evidence
  * / recommendation / provenance) — the Lead relays either.
  */
-function normalize(payload: any): {
+export function normalize(payload: any): {
   summary: string;
   counts: { critical: number; major: number; minor: number };
   findings: any[];
@@ -62,6 +54,7 @@ function normalize(payload: any): {
       location: f.location ?? "",
       fix: f.fix ?? f.recommendation ?? "",
       source: String(f.source ?? f.provenance ?? "real").toLowerCase(),
+      bbox: (f.bbox ?? null) as NormBbox | null,
     };
   });
 
@@ -176,8 +169,34 @@ async function assertPublicUrl(raw: string): Promise<void> {
   for (const a of addrs) if (isPrivateIp(a)) throw new Error("URL resolves to a private address");
 }
 
-async function runAudit(prompt: string, send: (e: SseEvent) => void, ac: AbortController): Promise<void> {
+async function runAudit(prompt: string, send: (e: SseEvent) => void, ac: AbortController, imagePath?: string): Promise<void> {
   const seen = new Set<string>();
+
+  const runLocatorQuery = (p: string) => new Promise<string>((resolve, reject) => {
+    (async () => {
+      try {
+        const q = query({ prompt: p, options: {
+          abortController: ac,
+          settingSources: ["project"],
+          permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
+          ...(process.env.AUDIT_MODEL ? { model: process.env.AUDIT_MODEL } : {}),
+        }});
+        for await (const m of q) {
+          if (m.type === "result") {
+            if (m.subtype === "success") resolve((m as any).result);
+            else reject(new Error(`locate failed: ${m.subtype}`));
+          }
+        }
+        // The iterator can end without a "result" message (e.g. the shared
+        // AbortController fires during the locate phase and the stream just
+        // stops). Settle here so `locate()` never hangs — an unsettled promise
+        // would block runAudit past its `finally`, leaking `active` and wedging
+        // the server at MAX_CONCURRENT. resolve/reject after settle is a no-op.
+        reject(new Error("locator query ended without a result"));
+      } catch (e) { reject(e as Error); }
+    })();
+  });
 
   const run = query({
     prompt,
@@ -223,6 +242,19 @@ async function runAudit(prompt: string, send: (e: SseEvent) => void, ac: AbortCo
         } catch (err) {
           send({ type: "error", message: `Could not parse audit JSON: ${String(err)}` });
           return;
+        }
+        // Screenshot audits only: locate critical/major findings on the uploaded image.
+        if (imagePath && Array.isArray(payload?.findings)) {
+          const eligible = payload.findings.filter(
+            (f: any) => ["critical", "major"].includes(String(f.severity).toLowerCase()));
+          if (eligible.length) {
+            try {
+              const boxes = await locate(imagePath, eligible, runLocatorQuery);
+              attachBboxes(eligible, boxes);
+            } catch (err) {
+              send({ type: "note", message: `annotation skipped: ${String(err)}` });
+            }
+          }
         }
         send({ type: "findings", ...normalize(payload) });
         send({
@@ -346,7 +378,7 @@ const server = createServer(async (req, res) => {
         } else {
           prompt = urlPrompt(url);
         }
-        await runAudit(prompt, send, ac);
+        await runAudit(prompt, send, ac, image ? shotPath! : undefined);
       } catch (err) {
         send({ type: "error", message: String(err) });
       } finally {
@@ -367,9 +399,11 @@ const server = createServer(async (req, res) => {
   res.writeHead(404).end("not found");
 });
 
-server.listen(PORT, () => {
-  console.log(`\n  UX Audit server → http://localhost:${PORT}\n`);
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.log("  (no ANTHROPIC_API_KEY — using the Claude Code login if available)\n");
-  }
-});
+if (process.env.NODE_ENV !== "test") {
+  server.listen(PORT, () => {
+    console.log(`\n  UX Audit server → http://localhost:${PORT}\n`);
+    if (!process.env.ANTHROPIC_API_KEY) {
+      console.log("  (no ANTHROPIC_API_KEY — using the Claude Code login if available)\n");
+    }
+  });
+}

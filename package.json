@@ -6,7 +6,8 @@
   "description": "UX audit orchestrator — Claude Agent SDK runner over the .claude/ agent + skill definitions",
   "scripts": {
     "audit": "tsx src/audit.ts",
-    "serve": "tsx src/server.ts"
+    "serve": "tsx src/server.ts",
+    "test": "NODE_ENV=test node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "latest",
