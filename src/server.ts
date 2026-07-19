@@ -188,6 +188,12 @@ async function runAudit(prompt: string, send: (e: SseEvent) => void, ac: AbortCo
             else reject(new Error(`locate failed: ${m.subtype}`));
           }
         }
+        // The iterator can end without a "result" message (e.g. the shared
+        // AbortController fires during the locate phase and the stream just
+        // stops). Settle here so `locate()` never hangs — an unsettled promise
+        // would block runAudit past its `finally`, leaking `active` and wedging
+        // the server at MAX_CONCURRENT. resolve/reject after settle is a no-op.
+        reject(new Error("locator query ended without a result"));
       } catch (e) { reject(e as Error); }
     })();
   });
