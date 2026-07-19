@@ -40,8 +40,16 @@ function locatePrompt(imagePath: string, findings: any[]): string {
     `Read the screenshot image at this path: ${imagePath}\n\n` +
     `Below is a numbered list of UX findings about that screenshot. For each one, return the ` +
     `bounding box of the element or region it refers to, as NORMALIZED coordinates in [0,1] ` +
-    `where x,y is the top-left corner and width,height are fractions of the image size. ` +
-    `If you cannot confidently locate a finding, return null for its bbox — never guess.\n\n` +
+    `where x,y is the top-left corner and width,height are fractions of the image size.\n\n` +
+    `Findings are usually phrased as a lack — "missing X", "lacks Y", "no Z", "weak/unclear W". ` +
+    `That phrasing does NOT mean the element is absent: if the finding is about an element that ` +
+    `is nonetheless VISIBLE in the screenshot (a button with no label, a CTA with weak styling, ` +
+    `product cards with no score badge, a heading with vague copy), box that visible element or ` +
+    `group. Use the finding's location hint after the "—" to find it. When it refers to several ` +
+    `repeated elements (e.g. "each product card"), box the group that contains them.\n\n` +
+    `Return null ONLY when there is no visible element or region to point at — a purely ` +
+    `page-wide quality with no anchor, or something that should exist but is entirely absent ` +
+    `from the layout. Never invent precise coordinates for something you cannot see.\n\n` +
     `${list}\n\n` +
     `Output ONLY this JSON in a single \`\`\`json block:\n` +
     `{"boxes":[{"index":0,"bbox":{"x":0,"y":0,"width":0,"height":0}},{"index":1,"bbox":null}]}`
